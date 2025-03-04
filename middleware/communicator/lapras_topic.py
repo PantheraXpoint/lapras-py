@@ -1,6 +1,6 @@
 from typing import List, Optional
-from lapras.communicator.mqtt_topic import MqttTopic
-from lapras.communicator.message_type import MessageType
+from communicator.mqtt_topic import MqttTopic
+from communicator.message_type import MessageType
 
 class LaprasTopic(MqttTopic):
     def __init__(self, place_name: Optional[str], message_type: Optional[MessageType], *subtopics):
