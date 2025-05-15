@@ -1,0 +1,14 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>.
+@prefix xml: <http://www.w3.org/2001/XMLSchema#>.
+@prefix lapras: <http://cdsn.kaist.ac.kr/lapras#>.
+
+[
+    (lapras:TestContext lapras:hasContextValue ?x)
+    noAction(lapras:NoHello, 60)
+    quotient(?x, 10, ?d)
+    product(?d, 10, ?dd)
+    difference(?dd, ?x, ?r)
+    equal(?r, 0)
+    ->
+    invoke("SayHello")
+]

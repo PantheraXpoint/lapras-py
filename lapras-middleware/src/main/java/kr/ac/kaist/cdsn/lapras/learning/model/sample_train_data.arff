@@ -1,0 +1,49 @@
+@RELATION presence
+
+@ATTRIBUTE total_presence_sig_cnt NUMERIC
+@ATTRIBUTE total_sig_burst_cnt NUMERIC
+@ATTRIBUTE avg_sig_interval NUMERIC
+@ATTRIBUTE class {empty,present}
+
+@WEIGHT 1.0,1.0,1.0
+
+@DATA
+22,3,3.4,present
+33,4,1.4,present
+22,7,3.4,present
+22,2,3.4,present
+22,3,3,present
+22,5,4.4,present
+22,4,4.4,present
+22,3,3.4,present
+5,1,2.1,present
+5,1,2.1,present
+5,0,8.2,present
+5,1,2.2,present
+4,0,1.2,present
+4,1,0.5,present
+2,0,15.2,empty
+4,1,7.2,empty
+2,0,15.2,empty
+1,0,60,empty
+3,0,15,empty
+3,0,20,empty
+2,0,15.2,empty
+0,0,60,empty
+0,0,60,empty
+0,0,60,empty
+0,0,60,empty
+1,0,60,empty
+0,0,60,empty
+0,0,60,empty
+0,0,60,empty
+0,0,60,empty
+0,0,60,empty
+0,0,60,empty
+1,0,60,empty
+0,0,60,empty
+0,0,60,empty
+1,0,60,empty
+0,0,60,empty
+0,0,60,empty
+1,0,60,empty

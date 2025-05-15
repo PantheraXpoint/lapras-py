@@ -1,0 +1,17 @@
+#!/bin/bash -e
+
+AGENT_ROOT=\$(cd \$1;pwd)
+
+JAR_NAME="$jarName"
+ARTIFACT_URL="http://wonder.kaist.ac.kr/lapras/lapras/-/jobs/artifacts/master/download?job=build"
+PRIVATE_TOKEN="DgHt3k3TufoBBZ5WzsHC"
+
+TEMP_DIR=/tmp/lapras-deploy-\$RANDOM
+TEMP_FILE=\$TEMP_DIR/lapras-artifact-\$RANDOM.zip
+mkdir -p \$TEMP_DIR
+wget --header "PRIVATE-TOKEN: \$PRIVATE_TOKEN" \$ARTIFACT_URL -O \$TEMP_FILE
+unzip \$TEMP_FILE -d \$TEMP_DIR
+
+INSTALL_DIR=\$TEMP_DIR/lapras-agents/build/install
+cp \$INSTALL_DIR/lib/* \$AGENT_ROOT/lib/
+cp \$INSTALL_DIR/\$JAR_NAME \$INSTALL_DIR/run.sh \$INSTALL_DIR/update.sh \$AGENT_ROOT

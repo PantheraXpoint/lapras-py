@@ -1,0 +1,39 @@
+@prefix lapras: <http://cdsn.kaist.ac.kr/lapras#>.
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>.
+@prefix xml: <http://www.w3.org/2001/XMLSchema#>.
+
+[
+    (lapras:InferredUserPresence lapras:hasContextValue "empty")
+    (lapras:UserPresence lapras:hasContextValue "empty")
+    (lapras:TotalSeatCount lapras:hasContextValue ?x)
+    ge(?x,1)
+    ->
+    updateContext("InferredUserPresence", "present")
+]
+
+[
+    (lapras:InferredUserPresence lapras:hasContextValue "present")
+    (lapras:UserPresence lapras:hasContextValue "empty")
+    (lapras:TotalSeatCount lapras:hasContextValue ?x)
+    equal(?x,0)
+    ->
+    updateContext("InferredUserPresence", "empty")
+]
+
+[
+    (lapras:InferredUserPresence lapras:hasContextValue "empty")
+    (lapras:UserPresence lapras:hasContextValue "present")
+    (lapras:TotalSeatCount lapras:hasContextValue ?x)
+    ge(?x,1)
+    ->
+    updateContext("InferredUserPresence", "present")
+]
+
+[
+    (lapras:InferredUserPresence lapras:hasContextValue "empty")
+    (lapras:UserPresence lapras:hasContextValue "present")
+    (lapras:TotalSeatCount lapras:hasContextValue ?x)
+    equal(?x,0)
+    ->
+    updateContext("InferredUserPresence", "present")
+]
