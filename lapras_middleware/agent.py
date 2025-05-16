@@ -1,6 +1,6 @@
 import logging
 import time
-from typing import List, Type, Optional, Dict, Any, Set
+from typing import List, Type, Optional, Dict, Any, Set, TYPE_CHECKING
 from dataclasses import dataclass
 from pathlib import Path
 import json
@@ -8,7 +8,6 @@ import locale
 from datetime import datetime
 
 from .action import ActionManager
-from .agent import AgentComponent
 from .communicator import MqttCommunicator
 from .context import ContextManager
 from .event import EventDispatcher, Event
@@ -17,6 +16,9 @@ from .task import TaskManager
 from .user import UserManager
 from .exceptions import LaprasException
 from .component import Component
+
+if TYPE_CHECKING:
+    from .agent import AgentComponent
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ class AgentConfig:
 class Agent:
     """Main agent class that coordinates all components and functionality."""
     
-    def __init__(self, agent_class: Type[AgentComponent], config: AgentConfig):
+    def __init__(self, agent_class: Type['AgentComponent'], config: AgentConfig):
         """Initialize the agent with a specific agent component class and configuration."""
         # Set up logging and locale
         logging.basicConfig(
@@ -118,12 +120,12 @@ class Agent:
         return None
     
     @property
-    def agent_component(self) -> AgentComponent:
+    def agent_component(self) -> 'AgentComponent':
         """Get the main agent component."""
         return self._agent_component
     
     @agent_component.setter
-    def agent_component(self, value: AgentComponent):
+    def agent_component(self, value: 'AgentComponent'):
         self._agent_component = value
     
     @property

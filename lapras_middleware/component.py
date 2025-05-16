@@ -1,11 +1,13 @@
-from typing import Optional
-from .event import EventDispatcher
-from .agent import Agent
+from typing import Optional, TYPE_CHECKING
+
+# if TYPE_CHECKING:
+#     from .event import EventDispatcher
+#     from .agent import Agent
 
 class Component:
     """Base class for all components in the LAPRAS system."""
     
-    def __init__(self, event_dispatcher: EventDispatcher, agent: Agent):
+    def __init__(self, event_dispatcher, agent):
         """Initialize a component with an event dispatcher and agent reference."""
         self.event_dispatcher = event_dispatcher
         self.agent = agent

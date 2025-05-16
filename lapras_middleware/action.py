@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -7,8 +7,10 @@ from threading import Lock
 
 from .component import Component
 from .event import Event, EventDispatcher
-from .agent import Agent
 from .communicator import MqttCommunicator, MqttMessage
+
+if TYPE_CHECKING:
+    from .agent import Agent
 
 @dataclass
 class Action:
@@ -109,7 +111,7 @@ class ActionInstance:
 class ActionManager(Component):
     """Manages actions in the system."""
     
-    def __init__(self, event_dispatcher: EventDispatcher, agent: Agent):
+    def __init__(self, event_dispatcher: EventDispatcher, agent: 'Agent'):
         """Initialize the action manager."""
         super().__init__(event_dispatcher, agent)
         
@@ -178,4 +180,12 @@ class ActionManager(Component):
             type="ACTION_TAKEN",
             data=action_instance,
             timestamp=action_instance.timestamp
+        ))
+
+    def _handle_action_message(self, topic: str, payload: bytes) -> None:
+        """Handle incoming action messages from MQTT."""
+        self.event_dispatcher.dispatch(Event(
+            type="MESSAGE_ARRIVED",
+            data=(topic, payload),
+            timestamp=int(datetime.now().timestamp() * 1000)
         )) 

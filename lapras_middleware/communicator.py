@@ -7,7 +7,7 @@ from datetime import datetime
 
 from .component import Component
 from .event import Event, EventDispatcher
-from .agent import Agent
+# from .agent import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class MqttMessage:
 class MqttCommunicator(Component):
     """Handles MQTT communication for the agent."""
     
-    def __init__(self, event_dispatcher: EventDispatcher, agent: Agent):
+    def __init__(self, event_dispatcher, agent):
         """Initialize the MQTT communicator."""
         super().__init__(event_dispatcher, agent)
         
@@ -77,7 +77,7 @@ class MqttCommunicator(Component):
         if rc == 0:
             logger.info("Connected to MQTT broker")
             # Resubscribe to topics
-            for topic in self.message_handlers.keys():
+            for topic in list(self.message_handlers.keys()):
                 self.client.subscribe(topic)
         else:
             logger.error(f"Failed to connect to MQTT broker with code: {rc}")

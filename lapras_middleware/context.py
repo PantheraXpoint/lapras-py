@@ -10,7 +10,7 @@ import time
 
 from .component import Component
 from .event import Event, EventDispatcher
-from .agent import Agent
+# from .agent import Agent
 from .communicator import MqttCommunicator, MqttMessage
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,7 @@ class ContextInstance:
 class ContextManager(Component):
     """Manages context information in the system."""
     
-    def __init__(self, event_dispatcher: EventDispatcher, agent: Agent):
+    def __init__(self, event_dispatcher, agent):
         """Initialize the context manager."""
         super().__init__(event_dispatcher, agent)
         
@@ -108,6 +108,14 @@ class ContextManager(Component):
         # Initialize periodic publisher
         self.periodic_publisher = ThreadPoolExecutor(max_workers=1)
         self.publish_tasks: Dict[str, threading.Timer] = {}
+        
+    def _handle_context_message(self, topic: str, payload: bytes) -> None:
+        """Handle incoming context messages."""
+        self.event_dispatcher.dispatch(Event(
+            type="MESSAGE_ARRIVED",
+            data=(topic, payload),
+            timestamp=int(time.time() * 1000)
+        ))
         
     def start(self) -> None:
         """Start the context manager."""

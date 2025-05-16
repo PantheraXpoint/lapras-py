@@ -7,7 +7,7 @@ from threading import Lock
 
 from .component import Component
 from .event import Event, EventDispatcher
-from .agent import Agent
+# from .agent import Agent
 from .communicator import MqttCommunicator, MqttMessage
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ class UserNotification:
 class UserManager(Component):
     """Manages user presence and notifications in the system."""
     
-    def __init__(self, event_dispatcher: EventDispatcher, agent: Agent):
+    def __init__(self, event_dispatcher, agent):
         """Initialize the user manager."""
         super().__init__(event_dispatcher, agent)
         

@@ -1,0 +1,8 @@
+{
+    "agent_name": "microwave_agent",
+    "mqtt": {
+        "broker": "localhost",
+        "port": 1883,
+        "client_id": "microwave_agent"
+    }
+} 

@@ -7,7 +7,7 @@ from threading import Lock
 
 from .component import Component
 from .event import Event, EventDispatcher
-from .agent import Agent
+# from .agent import Agent
 from .communicator import MqttCommunicator, MqttMessage
 
 logger = logging.getLogger(__name__)
@@ -178,7 +178,7 @@ class TaskNotification:
 class TaskManager(Component):
     """Manages tasks in the system."""
     
-    def __init__(self, event_dispatcher: EventDispatcher, agent: Agent):
+    def __init__(self, event_dispatcher, agent):
         """Initialize the task manager."""
         super().__init__(event_dispatcher, agent)
         

@@ -13,7 +13,7 @@ from functools import wraps
 
 from .component import Component
 from .event import Event, EventDispatcher
-from .agent import Agent
+# from .agent import Agent
 from .communicator import MqttCommunicator, MqttMessage
 
 logger = logging.getLogger(__name__)
@@ -168,7 +168,7 @@ class FunctionalityInvocation:
 class FunctionalityExecutor(Component):
     """Executes functionalities in the system."""
     
-    def __init__(self, event_dispatcher: EventDispatcher, agent: Agent):
+    def __init__(self, event_dispatcher, agent):
         """Initialize the functionality executor."""
         super().__init__(event_dispatcher, agent)
         

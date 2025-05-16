@@ -1,0 +1,14 @@
+2025-05-16 20:09:56,314 - SUBSCRIBE: MicrowaveAgent -> microwave_started
+2025-05-16 20:09:56,314 - SUBSCRIBE: MicrowaveAgent -> microwave_stopped
+2025-05-16 20:09:56,314 - DISPATCH: microwave_agent_started - Data: {'message': 'Microwave agent initialized', 'timestamp': 1747393796314}
+2025-05-16 20:09:56,314 - NO_SUBSCRIBERS: microwave_agent_started
+2025-05-16 20:09:56,314 - === Event Dispatcher Started ===
+2025-05-16 20:09:56,317 - SUBSCRIBE: ContextManager -> MESSAGE_ARRIVED
+2025-05-16 20:09:56,317 - SUBSCRIBE: FunctionalityExecutor -> MESSAGE_ARRIVED
+2025-05-16 20:09:56,317 - SUBSCRIBE: ActionManager -> MESSAGE_ARRIVED
+2025-05-16 20:09:56,317 - SUBSCRIBE: ActionManager -> ACTION_TAKEN
+2025-05-16 20:09:56,318 - SUBSCRIBE: TaskManager -> MESSAGE_ARRIVED
+2025-05-16 20:09:56,318 - SUBSCRIBE: TaskManager -> TASK_INITIATED
+2025-05-16 20:09:56,318 - SUBSCRIBE: TaskManager -> TASK_TERMINATED
+2025-05-16 20:09:56,318 - SUBSCRIBE: UserManager -> MESSAGE_ARRIVED
+2025-05-16 20:09:56,318 - SUBSCRIBE: UserManager -> USER_NOTIFIED
