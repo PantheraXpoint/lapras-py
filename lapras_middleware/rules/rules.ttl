@@ -3,84 +3,66 @@
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 @prefix lapras: <http://lapras.org/rule/> .
 @prefix : <http://lapras.org/rule/instances/> .
-
 # Aircon Rules
 :AirconRule1 a lapras:Rule ;
     lapras:hasAgent "aircon" ;
     lapras:hasCondition :AirconCondition1 ;
     lapras:hasAction :AirconAction1 .
-
 :AirconCondition1
     lapras:hasSensor "distance" ;
     lapras:hasOperator lapras:lessThan ;
     lapras:hasValue "2" .
-
 :AirconAction1
     lapras:hasStateUpdate '{"power": "on"}' .
-
 :AirconRule2 a lapras:Rule ;
     lapras:hasAgent "aircon" ;
     lapras:hasCondition :AirconCondition2 ;
     lapras:hasAction :AirconAction2 .
-
 :AirconCondition2
     lapras:hasSensor "distance" ;
     lapras:hasOperator lapras:greaterThanOrEqual ;
     lapras:hasValue "2" .
-
 :AirconAction2
     lapras:hasStateUpdate '{"power": "off"}' .
-
 # Sound Rules
 :SoundRule1 a lapras:Rule ;
     lapras:hasAgent "sound" ;
     lapras:hasCondition :SoundCondition1 ;
     lapras:hasAction :SoundAction1 .
-
 :SoundCondition1
     lapras:hasSensor "volume" ;
     lapras:hasOperator lapras:greaterThan ;
     lapras:hasValue "80" .
-
 :SoundAction1
     lapras:hasStateUpdate '{"mute": true}' .
-
 :SoundRule2 a lapras:Rule ;
     lapras:hasAgent "sound" ;
     lapras:hasCondition :SoundCondition2 ;
     lapras:hasAction :SoundAction2 .
-
 :SoundCondition2
     lapras:hasSensor "volume" ;
     lapras:hasOperator lapras:lessThan ;
     lapras:hasValue "80" .
-
 :SoundAction2
     lapras:hasStateUpdate '{"mute": false}' .
-
 # Temperature Rules
 :TempRule1 a lapras:Rule ;
     lapras:hasAgent "temperature" ;
     lapras:hasCondition :TempCondition1 ;
     lapras:hasAction :TempAction1 .
-
 :TempCondition1
     lapras:hasSensor "temperature" ;
     lapras:hasOperator lapras:greaterThan ;
     lapras:hasValue "25" .
-
 :TempAction1
     lapras:hasStateUpdate '{"cooling": true}' .
-
 :TempRule2 a lapras:Rule ;
     lapras:hasAgent "temperature" ;
     lapras:hasCondition :TempCondition2 ;
     lapras:hasAction :TempAction2 .
-
 :TempCondition2
     lapras:hasSensor "temperature" ;
     lapras:hasOperator lapras:lessThan ;
     lapras:hasValue "25" .
-
 :TempAction2
-    lapras:hasStateUpdate '{"cooling": false}' . 
+    lapras:hasStateUpdate '{"cooling": false}' .
