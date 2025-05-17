@@ -1,249 +1,114 @@
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Type
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
 import threading
 import time
+import queue
+import paho.mqtt.client as mqtt
 
-from .component import Component
-from .event import Event, EventDispatcher
-# from .agent import Agent
-from .communicator import MqttCommunicator, MqttMessage
+from .event import Event
+from .communicator import MqttMessage
 
 logger = logging.getLogger(__name__)
 
-def context_field(name: str = "", publish_as_updated: bool = False, publish_interval: int = 0):
-    """Decorator for context fields."""
-    def decorator(field):
-        field.context_field = {
-            'name': name or field.__name__,
-            'publish_as_updated': publish_as_updated,
-            'publish_interval': publish_interval
-        }
-        return field
-    return decorator
-
-@dataclass
-class ContextInstance:
-    """Represents a context instance in the system."""
-    name: str
-    value: Any
-    timestamp: int
-    publisher: str
-    value_type: Optional[str] = None
+class ContextManager:
+    """Manages context information for all agents in the system."""
     
-    def __post_init__(self):
-        """Initialize value type after initialization."""
-        if self.value_type is None and self.value is not None:
-            self.value_type = type(self.value).__name__
-    
-    @classmethod
-    def from_payload(cls, payload: bytes) -> Optional['ContextInstance']:
-        """Create a ContextInstance from a payload."""
-        try:
-            data = json.loads(payload.decode('utf-8'))
-            value = data['value']
-            value_type = data.get('value_type')
-            
-            # Try to convert value to the specified type
-            if value_type:
-                try:
-                    type_class = eval(value_type)  # Convert string to type
-                    value = type_class(value)
-                except (NameError, ValueError):
-                    pass  # Keep value as is if conversion fails
-            
-            return cls(
-                name=data['name'],
-                value=value,
-                timestamp=data['timestamp'],
-                publisher=data['publisher'],
-                value_type=value_type
-            )
-        except Exception as e:
-            logger.error(f"Failed to parse context payload: {e}", exc_info=True)
-            return None
-    
-    def to_payload(self) -> bytes:
-        """Convert the instance to a payload."""
-        data = {
-            'name': self.name,
-            'value': self.value,
-            'timestamp': self.timestamp,
-            'publisher': self.publisher,
-            'value_type': self.value_type
-        }
-        return json.dumps(data).encode('utf-8')
-    
-    @property
-    def message_type(self) -> str:
-        """Get the message type."""
-        return "CONTEXT"
-    
-    @property
-    def qos(self) -> int:
-        """Get the QoS level."""
-        return 1  # AT_LEAST_ONCE
-    
-    @property
-    def retained(self) -> bool:
-        """Get whether the message should be retained."""
-        return True
-
-class ContextManager(Component):
-    """Manages context information in the system."""
-    
-    def __init__(self, event_dispatcher, agent):
+    def __init__(self, mqtt_broker: str = "localhost", mqtt_port: int = 1883):
         """Initialize the context manager."""
-        super().__init__(event_dispatcher, agent)
+        # Thread-safe dictionary to store agent states
+        self.context_map: Dict[str, Dict[str, Any]] = {}
+        self.context_lock = threading.Lock()
         
-        self.mqtt_communicator = agent.mqtt_communicator
-        self.context_map: Dict[str, ContextInstance] = {}
-        self.contexts_published_as_updated: Set[str] = set()
-        self.lock = Lock()
+        # Set up MQTT client
+        self.mqtt_client = mqtt.Client()
+        self.mqtt_client.on_connect = self._on_connect
+        self.mqtt_client.on_message = self._on_message
+        self.mqtt_client.connect(mqtt_broker, mqtt_port)
         
-        # Initialize periodic publisher
-        self.periodic_publisher = ThreadPoolExecutor(max_workers=1)
-        self.publish_tasks: Dict[str, threading.Timer] = {}
+        # Start MQTT client loop
+        self.mqtt_client.loop_start()
         
-    def _handle_context_message(self, topic: str, payload: bytes) -> None:
-        """Handle incoming context messages."""
-        self.event_dispatcher.dispatch(Event(
-            type="MESSAGE_ARRIVED",
-            data=(topic, payload),
-            timestamp=int(time.time() * 1000)
-        ))
+        # Start rule executor publisher thread
+        self.running = True
+        self.rule_executor_thread = threading.Thread(target=self._rule_executor_publish_loop)
+        self.rule_executor_thread.start()
         
-    def start(self) -> None:
-        """Start the context manager."""
-        # Subscribe to context topics
-        self.mqtt_communicator.subscribe(
-            "context/#",
-            self._handle_context_message
-        )
-        
-        # Subscribe to events
-        self.event_dispatcher.subscribe(self, "MESSAGE_ARRIVED")
-        
-    def handle_event(self, event: Event) -> bool:
-        """Handle events."""
-        if event.type == "MESSAGE_ARRIVED":
-            topic, payload = event.data
-            if not topic.startswith("context/"):
-                return True
-                
-            context_instance = ContextInstance.from_payload(payload)
-            if context_instance:
-                logger.debug(
-                    "Context message arrived (name=%s, value=%s, timestamp=%d, publisher=%s)",
-                    context_instance.name,
-                    context_instance.value,
-                    context_instance.timestamp,
-                    context_instance.publisher
-                )
-                self.update_context(context_instance)
-            return True
+        logger.info("[CONTEXT_MANAGER] Context manager initialized")
+    
+    def _on_connect(self, client, userdata, flags, rc):
+        """Callback when connected to MQTT broker."""
+        logger.info(f"[CONTEXT_MANAGER] Connected to MQTT broker with result code {rc}")
+        # Subscribe to context center channel
+        self.mqtt_client.subscribe("context_center")
+    
+    def _on_message(self, client, userdata, msg):
+        """Callback when message is received from MQTT broker."""
+        try:
+            data = json.loads(msg.payload.decode())
+            agent_id = data.get("agent_id")
+            state = data.get("state", {})
+            timestamp = data.get("timestamp")
             
-        return False
+            if agent_id and state is not None:
+                with self.context_lock:
+                    self.context_map[agent_id] = {
+                        "state": state,
+                        "timestamp": timestamp,
+                        "last_update": time.time()
+                    }
+                    # Log the updated context map
+                    logger.info(f"[CONTEXT_MANAGER] Updated context for agent {agent_id}")
+                    logger.info(f"[CONTEXT_MANAGER] Current context map: {json.dumps(self.context_map, indent=2)}")
+        except Exception as e:
+            logger.error(f"[CONTEXT_MANAGER] Error processing message: {e}")
     
-    def publish_context(self, context_name: str, refresh_timestamp: bool = False) -> None:
-        """Publish a context to the MQTT broker."""
-        context_instance = self.context_map.get(context_name)
-        if context_instance is None:
-            return
-            
-        if refresh_timestamp:
-            context_instance.timestamp = int(time.time() * 1000)
-            
-        logger.info("Publishing context %s = %s", context_name, context_instance.value)
-        
-        self.mqtt_communicator.publish(MqttMessage(
-            topic=f"context/{context_name}",
-            payload=context_instance.to_payload(),
-            qos=context_instance.qos,
-            retain=context_instance.retained
-        ))
+    def _rule_executor_publish_loop(self) -> None:
+        """Loop that regularly publishes the context map to the rule executor."""
+        while self.running:
+            try:
+                with self.context_lock:
+                    message = {
+                        "timestamp": time.time(),
+                        "context_map": {
+                            agent_id: data["state"]
+                            for agent_id, data in self.context_map.items()
+                        }
+                    }
+                self.mqtt_client.publish("to_rule_executor", json.dumps(message))
+                logger.info("[CONTEXT_MANAGER] Published context map to rule executor:")
+                logger.info(f"[CONTEXT_MANAGER] Context map: {json.dumps(message, indent=2)}")
+                time.sleep(2)  # Publish every 2 second
+            except Exception as e:
+                logger.error(f"[CONTEXT_MANAGER] Error publishing to rule executor: {e}")
     
-    def subscribe_context(self, context_name: Optional[str] = None) -> None:
-        """Subscribe to context updates."""
-        if context_name is None:
-            logger.info("Subscribing to all contexts")
-            self.mqtt_communicator.subscribe("context/#", self._handle_context_message)
-        else:
-            logger.info("Subscribing to context %s", context_name)
-            self.mqtt_communicator.subscribe(f"context/{context_name}", self._handle_context_message)
+    def get_agent_state(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """Get the current state of an agent."""
+        with self.context_lock:
+            agent_data = self.context_map.get(agent_id)
+            return agent_data["state"] if agent_data else None
     
-    def update_context(self, context_name: str, context_value: Any, publisher: str, timestamp: Optional[int] = None) -> None:
-        """Update a context with new values."""
-        if timestamp is None:
-            timestamp = int(time.time() * 1000)
-            
-        context_instance = ContextInstance(
-            name=context_name,
-            value=context_value,
-            timestamp=timestamp,
-            publisher=publisher
-        )
-        self.update_context_instance(context_instance)
+    def get_all_states(self) -> Dict[str, Dict[str, Any]]:
+        """Get the current states of all agents."""
+        with self.context_lock:
+            return {
+                agent_id: data["state"]
+                for agent_id, data in self.context_map.items()
+            }
     
-    def update_context_instance(self, context_instance: ContextInstance) -> None:
-        """Update a context with a new instance."""
-        with self.lock:
-            former_instance = self.context_map.get(context_instance.name)
-            if (former_instance is None or 
-                former_instance.timestamp < context_instance.timestamp):
-                logger.info(
-                    "Updating context %s to %s",
-                    context_instance.name,
-                    context_instance.value
-                )
-                self.context_map[context_instance.name] = context_instance
-                
-                self.event_dispatcher.dispatch(Event(
-                    type="CONTEXT_UPDATED",
-                    data=context_instance,
-                    timestamp=context_instance.timestamp
-                ))
-                
-                if context_instance.name in self.contexts_published_as_updated:
-                    self.publish_context(context_instance.name)
-    
-    def set_publish_as_updated(self, context_name: str) -> None:
-        """Set a context to be published when updated."""
-        logger.info("Publish-as-updated set for context %s", context_name)
-        self.contexts_published_as_updated.add(context_name)
-    
-    def set_periodic_publish(self, context_name: str, interval: int) -> None:
-        """Set a context to be published periodically."""
-        logger.info("Periodic publish set for context %s every %d seconds", context_name, interval)
-        
-        def publish_task():
-            self.publish_context(context_name, True)
-            # Schedule next publish
-            self.publish_tasks[context_name] = threading.Timer(interval, publish_task)
-            self.publish_tasks[context_name].start()
-        
-        # Start periodic publishing
-        self.publish_tasks[context_name] = threading.Timer(0, publish_task)
-        self.publish_tasks[context_name].start()
-    
-    def get_context(self, context_name: str) -> Optional[ContextInstance]:
-        """Get a context instance by name."""
-        return self.context_map.get(context_name)
-    
-    def list_contexts(self) -> List[ContextInstance]:
-        """Get all context instances."""
-        return list(self.context_map.values())
+    def get_agent_last_update(self, agent_id: str) -> Optional[float]:
+        """Get the last update time of an agent."""
+        with self.context_lock:
+            agent_data = self.context_map.get(agent_id)
+            return agent_data["last_update"] if agent_data else None
     
     def stop(self) -> None:
         """Stop the context manager."""
-        # Cancel all periodic publish tasks
-        for timer in self.publish_tasks.values():
-            timer.cancel()
-        self.publish_tasks.clear()
-        
-        # Shutdown periodic publisher
-        self.periodic_publisher.shutdown(wait=True) 
+        logger.info("[CONTEXT_MANAGER] Stopping context manager...")
+        self.running = False
+        self.rule_executor_thread.join()
+        self.mqtt_client.loop_stop()
+        self.mqtt_client.disconnect()
+        logger.info("[CONTEXT_MANAGER] Context manager stopped") 
