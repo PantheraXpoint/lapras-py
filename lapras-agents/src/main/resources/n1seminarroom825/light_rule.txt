@@ -1,0 +1,60 @@
+@prefix lapras: <http://cdsn.kaist.ac.kr/lapras#>.
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>.
+@prefix xml: <http://www.w3.org/2001/XMLSchema#>.
+
+[
+    noAction(lapras:TurnOffAllLights, 1800)
+    noAction(lapras:TurnOffLightGroup1, 1800)
+    (lapras:LightGroup1 lapras:hasContextValue "Off")
+    (lapras:UserCount lapras:hasContextValue ?x)
+    ge(?x,2)
+    ->
+    invoke("TurnOnLightGroup1")
+]
+
+[
+    noAction(lapras:TurnOffAllLights, 1800)
+    noAction(lapras:TurnOffLightGroup2, 1800)
+    (lapras:LightGroup2 lapras:hasContextValue "Off")
+    (lapras:UserCount lapras:hasContextValue ?x)
+    ge(?x,2)
+    ->
+    invoke("TurnOnLightGroup2")
+]
+
+[
+    noAction(lapras:TurnOffAllLights, 1800)
+    noAction(lapras:TurnOffLightGroup3, 1800)
+    (lapras:LightGroup3 lapras:hasContextValue "Off")
+    (lapras:UserCount lapras:hasContextValue ?x)
+    ge(?x,2)
+    ->
+    invoke("TurnOnLightGroup3")
+]
+
+[
+    noAction(lapras:TurnOnAllLights, 1800)
+    noAction(lapras:TurnOnLightGroup1, 1800)
+    (lapras:LightGroup1 lapras:hasContextValue "On")
+    (lapras:UserCount lapras:hasContextValue 0)
+    ->
+    invoke("TurnOffLightGroup1")
+]
+
+[
+    noAction(lapras:TurnOnAllLights, 1800)
+    noAction(lapras:TurnOnLightGroup2, 1800)
+    (lapras:LightGroup2 lapras:hasContextValue "On")
+    (lapras:UserCount lapras:hasContextValue 0)
+    ->
+    invoke("TurnOffLightGroup2")
+]
+
+[
+    noAction(lapras:TurnOnAllLights, 1800)
+    noAction(lapras:TurnOnLightGroup3, 1800)
+    (lapras:LightGroup3 lapras:hasContextValue "On")
+    (lapras:UserCount lapras:hasContextValue 0)
+    ->
+    invoke("TurnOffLightGroup3")
+]

@@ -1,0 +1,70 @@
+% 1. Title: Presence Sensor Data
+%
+% 2. Sources:
+%      (a) Creator: Heesuk Son (heesuk.chad.son@gmail.com)
+%      (b) Date: Jan, 2017
+%
+% 3. Attribute description:
+%       In this dataset, the attribute values are numeric values
+%       which are counted during a specified period. For example,
+%       if a data designer determines to analyze a presence-sensor
+%       dataset with 1-minute length, the values for an attribute
+%       represents a counted number corresponding to the name for 1 minute.
+%       'sig_burst' means a chunk of more than 3 consecutive presence
+%       signals. In this data, the monitoring duration is 1 minute.
+%
+% 4. Weight balance:
+%       Compared to the traditional ARFF format, in this version,
+%       @WEIGHT tag is added to adjust the relative importance of
+%       the attributes. Each weight value should be bounded to a
+%       range of [0, 1]. If the @WEIGHT tag is omitted, the same
+%       weight, 1, is applied to all attributes.
+@RELATION presence
+
+@ATTRIBUTE total_presence_sig_cnt NUMERIC
+@ATTRIBUTE total_sig_burst_cnt NUMERIC
+@ATTRIBUTE avg_sig_interval NUMERIC
+@ATTRIBUTE class {empty,present}
+
+@WEIGHT 1,1,1
+
+@DATA
+22,3,3.4,present
+33,4,1.4,present
+22,7,3.4,present
+22,2,3.4,present
+22,3,3,present
+22,5,4.4,present
+22,4,4.4,present
+22,3,3.4,present
+5,1,2.1,present
+5,1,2.1,present
+5,0,8.2,present
+5,1,2.2,present
+4,0,1.2,present
+4,1,0.5,present
+2,0,15.2,empty
+4,1,7.2,empty
+2,0,15.2,empty
+1,0,60,empty
+3,0,15,empty
+3,0,20,empty
+2,0,15.2,empty
+0,0,60,empty
+0,0,60,empty
+0,0,60,empty
+0,0,60,empty
+1,0,60,empty
+0,0,60,empty
+0,0,60,empty
+0,0,60,empty
+0,0,60,empty
+0,0,60,empty
+0,0,60,empty
+1,0,60,empty
+0,0,60,empty
+0,0,60,empty
+1,0,60,empty
+0,0,60,empty
+0,0,60,empty
+1,0,60,empty

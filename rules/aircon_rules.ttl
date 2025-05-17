@@ -1,0 +1,39 @@
+
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# Rule for turning on air conditioner when person is far
+lapras:AirconOnRule
+    rdf:type lapras:Rule ;
+    lapras:hasCondition lapras:FarDistanceCondition ;
+    lapras:hasAction lapras:TurnOnAction .
+
+# Condition for far distance
+lapras:FarDistanceCondition
+    lapras:hasSensor "aircon/distance" ;
+    lapras:hasOperator lapras:greaterThan ;
+    lapras:hasValue "3.0"^^xsd:float .
+
+# Action to turn on
+lapras:TurnOnAction
+    lapras:hasDevice "aircon" ;
+    lapras:hasCommand "turn_on" .
+
+# Rule for turning off air conditioner when person is near
+lapras:AirconOffRule
+    rdf:type lapras:Rule ;
+    lapras:hasCondition lapras:NearDistanceCondition ;
+    lapras:hasAction lapras:TurnOffAction .
+
+# Condition for near distance
+lapras:NearDistanceCondition
+    lapras:hasSensor "aircon/distance" ;
+    lapras:hasOperator lapras:lessThan ;
+    lapras:hasValue "3.0"^^xsd:float .
+
+# Action to turn off
+lapras:TurnOffAction
+    lapras:hasDevice "aircon" ;
+    lapras:hasCommand "turn_off" .

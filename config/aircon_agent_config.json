@@ -1,0 +1,25 @@
+{
+    "agent_name": "aircon_agent",
+    "mqtt": {
+        "broker": "localhost",
+        "port": 1883,
+        "client_id": "aircon_agent"
+    },
+    "context": {
+        "update_interval": 5
+    },
+    "distance": {
+        "update_interval": 5000,
+        "threshold": 5.0
+    },
+    "actions": {
+        "on": {
+            "name": "aircon_on",
+            "description": "Turn on the air conditioner"
+        },
+        "off": {
+            "name": "aircon_off",
+            "description": "Turn off the air conditioner"
+        }
+    }
+} 

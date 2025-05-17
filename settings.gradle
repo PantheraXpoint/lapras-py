@@ -1,0 +1,6 @@
+rootProject.name = 'lapras'
+include 'lapras-agents'
+include 'lapras-middleware'
+include 'm2mkorea-rmi'
+include 'm2m-rmi'
+

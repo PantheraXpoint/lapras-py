@@ -1,0 +1,42 @@
+[
+    {
+        "agent": "DataCollectorAgent",
+        "managers": ["rooot"]
+    },
+    {
+        "agent": "DoorAgent",
+        "managers": ["rooot"]
+    },
+    {
+        "agent": "LightAgent",
+        "managers": ["rooot"]
+    },
+    {
+        "agent": "ProjectorAgent",
+        "managers": ["gwakbumjin", "rooot"]
+    },
+    {
+        "agent": "SeatAgent",
+        "managers": ["gwakbumjin", "rooot"]
+    },
+    {
+        "agent": "AirconAgent",
+        "managers": ["rooot"]
+    },
+    {
+        "agent": "AmbientSensorAgent",
+        "managers": ["hyunju4382", "rooot"]
+    },
+    {
+        "agent": "PodiumAgent",
+        "managers": ["hyunju4382", "rooot"]
+    },
+    {
+        "agent": "PresenceSensorAgent",
+        "managers": ["heesukson", "rooot"]
+    },
+    {
+        "agent": "WhiteBoardAgent",
+        "managers": ["gwakbumjin", "rooot"]
+    }
+]
