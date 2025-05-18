@@ -14,7 +14,7 @@ lapras:AirconOnRule
 lapras:FarDistanceCondition
     lapras:hasSensor "aircon/distance" ;
     lapras:hasOperator lapras:greaterThan ;
-    lapras:hasValue "3.0"^^xsd:float .
+    lapras:hasValue "1.0"^^xsd:float .
 
 # Action to turn on
 lapras:TurnOnAction
@@ -31,7 +31,7 @@ lapras:AirconOffRule
 lapras:NearDistanceCondition
     lapras:hasSensor "aircon/distance" ;
     lapras:hasOperator lapras:lessThan ;
-    lapras:hasValue "3.0"^^xsd:float .
+    lapras:hasValue "1.0"^^xsd:float .
 
 # Action to turn off
 lapras:TurnOffAction
