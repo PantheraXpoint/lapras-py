@@ -10,7 +10,7 @@ from lapras_middleware.agent import Agent
 logger = logging.getLogger(__name__)
 
 class AirconAgent(Agent):
-    def __init__(self, agent_id: str = "aircon", mqtt_broker: str = "localhost", mqtt_port: int = 1883):
+    def __init__(self, agent_id: str = "aircon", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
         self.ir_sensor = None
         self._phidget_initialized_successfully = False
         # Initialize other rate-limiting time trackers if used in perception

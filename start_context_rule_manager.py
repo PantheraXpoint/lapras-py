@@ -26,7 +26,7 @@ class ContextRuleService:
         try:
             # Initialize context rule manager
             self.context_rule_manager = ContextRuleManager(
-                mqtt_broker="localhost",
+                mqtt_broker="143.248.57.73",
                 mqtt_port=1883
             )
             self.logger.info("Context rule manager initialized")

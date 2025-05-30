@@ -17,8 +17,13 @@ env/
 .vscode/
 .idea/
 
+# Gradle
+.gradle/
+
 # Logs
-*.log.gradle/
+*.log
+
+# Agents
 lapras_agents/aircon_control_agent.py
 lapras_agents/ir_agent.py
 lapras_agents/light_agent.py
