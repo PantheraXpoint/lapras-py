@@ -20,6 +20,7 @@ class SensorAgent(Agent, ABC):
         # Sensor state
         self.last_reading_time = 0
         self.reading_interval = 0.2  # Default 200ms reading interval
+        self.reading_count = 0  # Track number of readings
         
         # Initialize the base Agent class
         super().__init__(sensor_id, mqtt_broker, mqtt_port)
@@ -47,6 +48,8 @@ class SensorAgent(Agent, ABC):
             value, unit, metadata = self.read_sensor()
             
             if value is not None:
+                self.reading_count += 1
+                
                 # Create readSensor event using EventFactory (ASYNCHRONOUS)
                 event = EventFactory.create_sensor_event(
                     sensor_id=self.agent_id,
@@ -61,7 +64,7 @@ class SensorAgent(Agent, ABC):
                 topic = TopicManager.sensor_to_virtual(self.agent_id, self.virtual_agent_id)
                 message = MQTTMessage.serialize(event)
                 self.mqtt_client.publish(topic, message)
-                logger.debug(f"[{self.agent_id}] Published readSensor event: {value} {unit}")
+                logger.info(f"[{self.agent_id}] Published reading #{self.reading_count}: {value} {unit}")
                     
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error reading/publishing sensor data: {e}")
