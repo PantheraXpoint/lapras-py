@@ -9,6 +9,8 @@ import rdflib
 from rdflib import Graph, Literal, Namespace
 from rdflib.namespace import RDF, RDFS, XSD
 
+from .event import EventFactory, MQTTMessage, TopicManager, ContextPayload, ActionReportPayload
+
 logger = logging.getLogger(__name__)
 
 class ContextRuleManager:
@@ -24,6 +26,13 @@ class ContextRuleManager:
         
         # Rule execution attributes
         self.rules_graph = Graph()
+        
+        # Define lapras namespace for SPARQL queries
+        self.lapras = Namespace("http://lapras.org/rule/")
+        self.rules_graph.bind("lapras", self.lapras)
+        
+        # Track known virtual agents for dynamic topic subscription
+        self.known_agents: set = set()
         
         # Set up MQTT client with a unique client ID
         mqtt_client_id = f"{self.service_id}-{int(time.time()*1000)}"
@@ -45,39 +54,85 @@ class ContextRuleManager:
         """Callback when connected to MQTT broker."""
         if rc == 0:
             logger.info(f"[{self.service_id}] Successfully connected to MQTT broker.")
-            # Subscribe to context center channel (where agents publish their states)
-            self.mqtt_client.subscribe("context_center")
-            logger.info(f"[{self.service_id}] Subscribed to topic: context_center")
+            # Subscribe to updateContext events from all virtual agents using wildcard
+            # Topic pattern: virtual/+/to/context/updateContext
+            context_topic_pattern = "virtual/+/to/context/updateContext"
+            self.mqtt_client.subscribe(context_topic_pattern)
+            logger.info(f"[{self.service_id}] Subscribed to topic pattern: {context_topic_pattern}")
+            
+            # Subscribe to actionReport events from all virtual agents using wildcard
+            # Topic pattern: virtual/+/to/context/actionReport
+            report_topic_pattern = "virtual/+/to/context/actionReport"
+            self.mqtt_client.subscribe(report_topic_pattern)
+            logger.info(f"[{self.service_id}] Subscribed to topic pattern: {report_topic_pattern}")
         else:
             logger.error(f"[{self.service_id}] Failed to connect to MQTT broker. Result code: {rc}")
 
     def _on_message(self, client, userdata, msg):
-        """Callback when message is received from agents on context_center topic."""
+        """Callback when message is received from virtual agents."""
         logger.debug(f"[{self.service_id}] Message received on topic '{msg.topic}'")
         try:
-            data = json.loads(msg.payload.decode())
-            agent_id = data.get("agent_id")
-            state = data.get("state", {})
-            timestamp = data.get("timestamp")
+            event = MQTTMessage.deserialize(msg.payload.decode())
             
-            if agent_id and state is not None:
-                # Update context map
-                with self.context_lock:
-                    self.context_map[agent_id] = {
-                        "state": state,
-                        "timestamp": timestamp,
-                        "last_update": time.time()
-                    }
-                    logger.info(f"[{self.service_id}] Updated context for agent {agent_id}")
-                    logger.debug(f"[{self.service_id}] Current context map: {json.dumps(self.context_map, indent=2)}")
-                
-                # Immediately apply rules for this agent
-                self._apply_rules_for_agent(agent_id, state, timestamp)
+            if event.event.type == "updateContext":
+                # Handle updateContext event from VirtualAgent (ASYNCHRONOUS)
+                self._handle_context_update(event)
+            elif event.event.type == "actionReport":
+                # Handle actionReport event from VirtualAgent (SYNCHRONOUS - Response)
+                self._handle_action_report(event)
+            else:
+                logger.warning(f"[{self.service_id}] Unknown event type: {event.event.type}")
                 
         except json.JSONDecodeError:
             logger.error(f"[{self.service_id}] Message payload on topic '{msg.topic}' was not valid JSON: {msg.payload.decode(errors='ignore')}")
         except Exception as e:
             logger.error(f"[{self.service_id}] Error processing message: {e}", exc_info=True)
+
+    def _handle_context_update(self, event):
+        """Handle updateContext event from VirtualAgent (ASYNCHRONOUS)."""
+        try:
+            context_payload = MQTTMessage.get_payload_as(event, ContextPayload)
+            agent_id = event.source.entityId
+            
+            # Update context map
+            with self.context_lock:
+                self.context_map[agent_id] = {
+                    "state": context_payload.state,
+                    "agent_type": context_payload.agent_type,
+                    "sensors": context_payload.sensors,
+                    "timestamp": event.event.timestamp,
+                    "last_update": time.time()
+                }
+                logger.info(f"[{self.service_id}] Updated context for agent {agent_id}")
+                logger.debug(f"[{self.service_id}] Current context map: {json.dumps(self.context_map, indent=2)}")
+            
+            # Track this agent for future action commands
+            self.known_agents.add(agent_id)
+            
+            # Immediately apply rules for this agent
+            self._apply_rules_for_agent(agent_id, context_payload.state, event.event.timestamp)
+            
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error handling context update: {e}", exc_info=True)
+
+    def _handle_action_report(self, event):
+        """Handle actionReport event from VirtualAgent (SYNCHRONOUS - Response)."""
+        try:
+            report_payload = MQTTMessage.get_payload_as(event, ActionReportPayload)
+            agent_id = event.source.entityId
+            
+            logger.info(f"[{self.service_id}] Received action report from {agent_id}: success={report_payload.success}, message='{report_payload.message}'")
+            
+            if report_payload.new_state:
+                # Update our context map with the new state
+                with self.context_lock:
+                    if agent_id in self.context_map:
+                        self.context_map[agent_id]["state"].update(report_payload.new_state)
+                        self.context_map[agent_id]["last_update"] = time.time()
+                        logger.info(f"[{self.service_id}] Updated context for {agent_id} with new state from action report")
+            
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error handling action report: {e}", exc_info=True)
 
     def _apply_rules_for_agent(self, agent_id: str, current_state: Dict[str, Any], timestamp: Any):
         """Apply rules for a specific agent immediately when context is updated."""
@@ -90,21 +145,67 @@ class ContextRuleManager:
             if state_after_rules is not None:
                 # Only publish if the state actually changed as a result of the rules
                 if state_after_rules != current_state:
-                    message_to_agent = {
-                        "agent_id": agent_id,
-                        "state": state_after_rules,
-                        "timestamp": timestamp
-                    }
-                    publish_topic = "context_dist"
-                    self.mqtt_client.publish(publish_topic, json.dumps(message_to_agent))
-                    logger.info(f"[{self.service_id}] State for agent '{agent_id}' CHANGED by rules. Published new state to '{publish_topic}': {json.dumps(state_after_rules, indent=2)}")
+                    # Determine what actions need to be taken based on state changes
+                    actions_to_execute = self._determine_actions_from_state_change(current_state, state_after_rules)
+                    
+                    for action in actions_to_execute:
+                        self._send_action_command(agent_id, action["actionName"], action.get("parameters"))
+                    
+                    logger.info(f"[{self.service_id}] State for agent '{agent_id}' CHANGED by rules. Sent {len(actions_to_execute)} action commands.")
                 else:
-                    logger.info(f"[{self.service_id}] Rules evaluated for agent '{agent_id}', but resulting state is IDENTICAL to original. No change published.")
+                    logger.info(f"[{self.service_id}] Rules evaluated for agent '{agent_id}', but resulting state is IDENTICAL to original. No actions sent.")
             else:
                 logger.info(f"[{self.service_id}] No applicable rules resulted in a state change for agent '{agent_id}', or an error occurred in evaluation.")
                 
         except Exception as e:
             logger.error(f"[{self.service_id}] Error applying rules for agent '{agent_id}': {e}", exc_info=True)
+
+    def _determine_actions_from_state_change(self, old_state: Dict[str, Any], new_state: Dict[str, Any]) -> list:
+        """Determine what action commands to send based on state changes."""
+        actions = []
+        
+        # Check for power state changes
+        if old_state.get("power") != new_state.get("power"):
+            if new_state.get("power") == "on":
+                actions.append({"actionName": "turn_on"})
+            elif new_state.get("power") == "off":
+                actions.append({"actionName": "turn_off"})
+        
+        # Check for temperature changes
+        if old_state.get("temperature") != new_state.get("temperature"):
+            actions.append({
+                "actionName": "set_temperature",
+                "parameters": {"temperature": new_state.get("temperature")}
+            })
+        
+        # Check for mode changes
+        if old_state.get("mode") != new_state.get("mode"):
+            actions.append({
+                "actionName": "set_mode", 
+                "parameters": {"mode": new_state.get("mode")}
+            })
+        
+        return actions
+
+    def _send_action_command(self, agent_id: str, action_name: str, parameters: Optional[Dict[str, Any]] = None):
+        """Send an action command to a VirtualAgent (SYNCHRONOUS - Request)."""
+        try:
+            # Create applyAction event
+            action_event = EventFactory.create_action_event(
+                virtual_agent_id=agent_id,
+                action_name=action_name,
+                parameters=parameters
+            )
+            
+            # Publish to the agent's action topic
+            action_topic = TopicManager.context_to_virtual_action(agent_id)
+            action_message = MQTTMessage.serialize(action_event)
+            self.mqtt_client.publish(action_topic, action_message)
+            
+            logger.info(f"[{self.service_id}] Sent action command '{action_name}' to agent '{agent_id}' on topic '{action_topic}'")
+            
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error sending action command to {agent_id}: {e}", exc_info=True)
 
     def evaluate_rules(self, agent_id: str, current_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """

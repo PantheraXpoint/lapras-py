@@ -1,11 +1,13 @@
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set
+from dataclasses import dataclass, asdict
+from typing import Any, Dict, Optional, Union
 import logging
 import threading
 from queue import Queue, Empty
 import os
-from datetime import datetime
 import json
+import time
+from datetime import datetime
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -28,113 +30,265 @@ event_file_handler.setFormatter(event_formatter)
 event_logger.addHandler(event_file_handler)
 
 @dataclass
-class Event:
-    """Represents an event in the system."""
-    type: str
-    data: Any
-    timestamp: Optional[int] = None
-
-class EventDispatcher:
-    """Handles event dispatching to subscribed components."""
+class EventMetadata:
+    """Event metadata containing type and context information."""
+    id: str
+    timestamp: str
+    type: str  # "readSensor", "updateContext", "applyAction", "actionReport"
+    location: Optional[str] = None
+    contextType: Optional[str] = None
+    priority: str = "Normal"  # "Low", "Normal", "High", "Critical"
     
-    def __init__(self):
-        """Initialize the event dispatcher."""
-        self.subscribers: Dict[str, Set[Any]] = {}
-        self.event_queue: Queue = Queue()
-        self.running: bool = False
-        self.thread: Optional[threading.Thread] = None
-        self._lock = threading.Lock()  # Lock for thread-safe operations
+    def __post_init__(self):
+        if not self.id:
+            self.id = str(uuid.uuid4())[:8]
+        if not self.timestamp:
+            self.timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+@dataclass
+class EntityInfo:
+    """Source or target entity information."""
+    entityType: str  # "sensorAgent", "virtualAgent", "contextManager"
+    entityId: str
+
+@dataclass
+class Event:
+    """Unified event structure for all system communications."""
+    event: EventMetadata
+    source: EntityInfo
+    target: EntityInfo
+    payload: Dict[str, Any]
+
+# =============================================================================
+# PAYLOAD STRUCTURES FOR DIFFERENT EVENT TYPES
+# =============================================================================
+
+# ASYNCHRONOUS/CONTINUOUS EVENTS (Stream-based communication)
+@dataclass
+class SensorPayload:
+    """Payload for readSensor events (ASYNCHRONOUS - continuous stream)."""
+    sensor_type: str  # "infrared", "temperature", "humidity"
+    value: Union[float, int, str, bool]
+    unit: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+@dataclass
+class ContextPayload:
+    """Payload for updateContext events (ASYNCHRONOUS - continuous stream)."""
+    agent_type: str  # "aircon", "light", "microwave"
+    state: Dict[str, Any]
+    sensors: Optional[Dict[str, Any]] = None
+
+# SYNCHRONOUS/ONE-TIME EVENTS (Request-Response communication)
+@dataclass
+class ActionPayload:
+    """Payload for applyAction events (SYNCHRONOUS - one-time request)."""
+    actionName: str  # "turn_on", "turn_off", "set_temperature"
+    parameters: Optional[Dict[str, Any]] = None
+
+@dataclass
+class ActionReportPayload:
+    """Payload for actionReport events (SYNCHRONOUS - one-time response)."""
+    command_id: str
+    success: bool
+    message: Optional[str] = None
+    new_state: Optional[Dict[str, Any]] = None
+
+class EventFactory:
+    """Factory class to create standardized events."""
+    
+    # ASYNCHRONOUS EVENT CREATORS
+    @staticmethod
+    def create_sensor_event(
+        sensor_id: str,
+        virtual_agent_id: str,
+        sensor_type: str,
+        value: Union[float, int, str, bool],
+        unit: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        location: Optional[str] = None
+    ) -> Event:
+        """Create a readSensor event from SensorAgent to VirtualAgent (ASYNCHRONOUS)."""
+        return Event(
+            event=EventMetadata(
+                id="",  # Will be auto-generated
+                timestamp="",  # Will be auto-generated
+                type="readSensor",
+                location=location,
+                contextType=sensor_type
+            ),
+            source=EntityInfo(
+                entityType="sensorAgent",
+                entityId=sensor_id
+            ),
+            target=EntityInfo(
+                entityType="virtualAgent", 
+                entityId=virtual_agent_id
+            ),
+            payload=asdict(SensorPayload(
+                sensor_type=sensor_type,
+                value=value,
+                unit=unit,
+                metadata=metadata
+            ))
+        )
+    
+    @staticmethod
+    def create_context_event(
+        virtual_agent_id: str,
+        agent_type: str,
+        state: Dict[str, Any],
+        sensors: Optional[Dict[str, Any]] = None,
+        location: Optional[str] = None
+    ) -> Event:
+        """Create an updateContext event from VirtualAgent to ContextManager (ASYNCHRONOUS)."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="updateContext",
+                location=location,
+                contextType=agent_type
+            ),
+            source=EntityInfo(
+                entityType="virtualAgent",
+                entityId=virtual_agent_id
+            ),
+            target=EntityInfo(
+                entityType="contextManager",
+                entityId="CM-MainController"
+            ),
+            payload=asdict(ContextPayload(
+                agent_type=agent_type,
+                state=state,
+                sensors=sensors
+            ))
+        )
+    
+    # SYNCHRONOUS EVENT CREATORS
+    @staticmethod
+    def create_action_event(
+        virtual_agent_id: str,
+        action_name: str,
+        parameters: Optional[Dict[str, Any]] = None,
+        location: Optional[str] = None,
+        priority: str = "Normal"
+    ) -> Event:
+        """Create an applyAction event from ContextManager to VirtualAgent (SYNCHRONOUS - Request)."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="applyAction",
+                location=location,
+                priority=priority
+            ),
+            source=EntityInfo(
+                entityType="contextManager",
+                entityId="CM-MainController"
+            ),
+            target=EntityInfo(
+                entityType="virtualAgent",
+                entityId=virtual_agent_id
+            ),
+            payload=asdict(ActionPayload(
+                actionName=action_name,
+                parameters=parameters
+            ))
+        )
+    
+    @staticmethod
+    def create_action_report_event(
+        virtual_agent_id: str,
+        command_id: str,
+        success: bool,
+        message: Optional[str] = None,
+        new_state: Optional[Dict[str, Any]] = None
+    ) -> Event:
+        """Create an actionReport event from VirtualAgent to ContextManager (SYNCHRONOUS - Response)."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="actionReport"
+            ),
+            source=EntityInfo(
+                entityType="virtualAgent",
+                entityId=virtual_agent_id
+            ),
+            target=EntityInfo(
+                entityType="contextManager",
+                entityId="CM-MainController"
+            ),
+            payload=asdict(ActionReportPayload(
+                command_id=command_id,
+                success=success,
+                message=message,
+                new_state=new_state
+            ))
+        )
+
+class MQTTMessage:
+    """Utility class for MQTT message serialization/deserialization."""
+    
+    @staticmethod
+    def serialize(event: Event) -> str:
+        """Serialize Event object to JSON string for MQTT."""
+        return json.dumps(asdict(event), indent=2)
+    
+    @staticmethod
+    def deserialize(message: str) -> Event:
+        """Deserialize JSON string to Event object."""
+        data = json.loads(message)
         
-    def start(self) -> None:
-        """Start the event dispatcher thread."""
-        with self._lock:
-            if self.running:
-                logger.warning("Event dispatcher is already running")
-                return
-                
-            self.running = True
-            self.thread = threading.Thread(target=self._process_events, daemon=True)
-            self.thread.start()
-            logger.info("[EVENT_DISPATCHER] Event dispatcher started")
-            logger.info(f"[EVENT_DISPATCHER] Current subscribers: {json.dumps({k: [c.__class__.__name__ for c in v] for k, v in self.subscribers.items()}, indent=2)}")
-            event_logger.info("=== Event Dispatcher Started ===")
+        # Reconstruct the Event object
+        event_data = data["event"]
+        source_data = data["source"]
+        target_data = data["target"]
+        payload_data = data["payload"]
         
-    def stop(self) -> None:
-        """Stop the event dispatcher thread."""
-        with self._lock:
-            if not self.running:
-                logger.warning("Event dispatcher is not running")
-                return
-                
-            self.running = False
-            if self.thread:
-                self.thread.join(timeout=5.0)  # Wait up to 5 seconds for thread to finish
-            logger.info("[EVENT_DISPATCHER] Event dispatcher stopped")
-            event_logger.info("=== Event Dispatcher Stopped ===")
-            
-    def subscribe(self, component: Any, event_type: str) -> None:
-        """Subscribe a component to an event type."""
-        with self._lock:
-            if event_type not in self.subscribers:
-                self.subscribers[event_type] = set()
-            self.subscribers[event_type].add(component)
-            logger.info(f"[EVENT_DISPATCHER] Component {component.__class__.__name__} subscribed to event: {event_type}")
-            logger.info(f"[EVENT_DISPATCHER] Current subscribers for {event_type}: {[c.__class__.__name__ for c in self.subscribers[event_type]]}")
-            event_logger.info(f"SUBSCRIBE: {component.__class__.__name__} -> {event_type}")
-        
-    def unsubscribe(self, component: Any, event_type: str) -> None:
-        """Unsubscribe a component from an event type."""
-        with self._lock:
-            if event_type in self.subscribers:
-                self.subscribers[event_type].discard(component)
-                logger.info(f"Component {component.__class__.__name__} unsubscribed from event: {event_type}")
-                event_logger.info(f"UNSUBSCRIBE: {component.__class__.__name__} -> {event_type}")
-            
-    def dispatch(self, event: Event) -> None:
-        """Dispatch an event to all subscribed components."""
-        if not self.running:
-            logger.warning("[EVENT_DISPATCHER] Event dispatcher is not running, event not dispatched")
-            return
-            
-        logger.info(f"[EVENT_DISPATCHER] Dispatching event: {event.type}")
-        logger.info(f"[EVENT_DISPATCHER] Event data: {json.dumps(event.data, indent=2) if isinstance(event.data, (dict, list)) else event.data}")
-        logger.info(f"[EVENT_DISPATCHER] Subscribers for {event.type}: {[c.__class__.__name__ for c in self.subscribers.get(event.type, set())]}")
-        event_logger.info(f"DISPATCH: {event.type} - Data: {event.data}")
-        self.event_queue.put(event)
-        
-    def _process_events(self) -> None:
-        """Process events from the queue."""
-        logger.info("[EVENT_DISPATCHER] Event processing thread started")
-        while self.running:
-            try:
-                event = self.event_queue.get(timeout=1.0)
-                logger.info(f"[EVENT_DISPATCHER] Processing event: {event.type}")
-                self._handle_event(event)
-                self.event_queue.task_done()
-                logger.info(f"[EVENT_DISPATCHER] Event processed: {event.type}")
-            except Empty:
-                continue
-            except Exception as e:
-                logger.error(f"[EVENT_DISPATCHER] Error processing event: {e}", exc_info=True)
-                event_logger.error(f"ERROR: {str(e)}")
-                
-    def _handle_event(self, event: Event) -> None:
-        """Handle a single event by dispatching it to subscribers."""
-        with self._lock:
-            if event.type not in self.subscribers:
-                logger.debug(f"[EVENT_DISPATCHER] No subscribers for event: {event.type}")
-                event_logger.info(f"NO_SUBSCRIBERS: {event.type}")
-                return
-                
-            subscribers = self.subscribers[event.type].copy()  # Create a copy to avoid modification during iteration
-            logger.info(f"[EVENT_DISPATCHER] Found {len(subscribers)} subscribers for event: {event.type}")
-            
-        for component in subscribers:
-            try:
-                logger.info(f"[EVENT_DISPATCHER] Component {component.__class__.__name__} handling event: {event.type}")
-                event_logger.info(f"HANDLE: {component.__class__.__name__} -> {event.type}")
-                component.handle_event(event)
-                logger.info(f"[EVENT_DISPATCHER] Component {component.__class__.__name__} handled event: {event.type}")
-            except Exception as e:
-                logger.error(f"[EVENT_DISPATCHER] Error handling event in component {component.__class__.__name__}: {e}", exc_info=True)
-                event_logger.error(f"ERROR: {component.__class__.__name__} -> {event.type} - {str(e)}") 
+        return Event(
+            event=EventMetadata(**event_data),
+            source=EntityInfo(**source_data),
+            target=EntityInfo(**target_data),
+            payload=payload_data
+        )
+    
+    @staticmethod
+    def get_payload_as(event: Event, payload_class):
+        """Extract payload as specific payload class."""
+        if payload_class == SensorPayload:
+            return SensorPayload(**event.payload)
+        elif payload_class == ContextPayload:
+            return ContextPayload(**event.payload)
+        elif payload_class == ActionPayload:
+            return ActionPayload(**event.payload)
+        elif payload_class == ActionReportPayload:
+            return ActionReportPayload(**event.payload)
+        else:
+            return event.payload
+
+class TopicManager:
+    """Manages MQTT topic naming conventions."""
+    
+    # ASYNCHRONOUS/CONTINUOUS TOPICS
+    @staticmethod
+    def sensor_to_virtual(sensor_id: str, virtual_agent_id: str) -> str:
+        """Topic for readSensor events from SensorAgent to VirtualAgent (ASYNCHRONOUS)."""
+        return f"sensor/{sensor_id}/to/{virtual_agent_id}/readSensor"
+    
+    @staticmethod
+    def virtual_to_context(virtual_agent_id: str) -> str:
+        """Topic for updateContext events from VirtualAgent to ContextManager (ASYNCHRONOUS)."""
+        return f"virtual/{virtual_agent_id}/to/context/updateContext"
+    
+    # SYNCHRONOUS/ONE-TIME TOPICS
+    @staticmethod
+    def context_to_virtual_action(virtual_agent_id: str) -> str:
+        """Topic for applyAction events from ContextManager to VirtualAgent (SYNCHRONOUS - Request)."""
+        return f"context/to/{virtual_agent_id}/applyAction"
+    
+    @staticmethod
+    def virtual_to_context_report(virtual_agent_id: str) -> str:
+        """Topic for actionReport events from VirtualAgent to ContextManager (SYNCHRONOUS - Response)."""
+        return f"virtual/{virtual_agent_id}/to/context/actionReport" 
