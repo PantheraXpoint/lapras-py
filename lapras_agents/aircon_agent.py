@@ -12,7 +12,7 @@ from lapras_middleware.event import ActionPayload, SensorPayload
 logger = logging.getLogger(__name__)
 
 class AirconAgent(VirtualAgent):
-    def __init__(self, agent_id: str = "aircon", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+    def __init__(self, agent_id: str = "aircon", mqtt_broker: str = "localhost", mqtt_port: int = 1883):
         super().__init__(agent_id, "aircon", mqtt_broker, mqtt_port)
         
         logger.info(f"[{self.agent_id}] AirconAgent initialized")
@@ -34,6 +34,9 @@ class AirconAgent(VirtualAgent):
     def _process_sensor_update(self, sensor_payload: SensorPayload, sensor_id: str):
         """Process sensor data updates from managed sensors."""
         if sensor_payload.sensor_type == "infrared":
+            # DEBUG: Log all received sensor readings to debug the issue
+            logger.info(f"[{self.agent_id}] DEBUG: Received IR sensor reading: distance={sensor_payload.value}{sensor_payload.unit}, metadata={sensor_payload.metadata}")
+            
             # Update proximity status based on infrared sensor
             if sensor_payload.metadata and "proximity_status" in sensor_payload.metadata:
                 old_proximity = None
@@ -50,6 +53,8 @@ class AirconAgent(VirtualAgent):
                     logger.info(f"[{self.agent_id}] Updated from IR sensor: distance={sensor_payload.value}{sensor_payload.unit}, proximity={sensor_payload.metadata['proximity_status']}")
                     # Trigger state publication since local_state changed
                     self._trigger_state_publication()
+                else:
+                    logger.debug(f"[{self.agent_id}] IR sensor data unchanged: distance={sensor_payload.value}{sensor_payload.unit}, proximity={sensor_payload.metadata['proximity_status']}")
 
     def perception(self):
         """Internal perception logic - runs continuously."""

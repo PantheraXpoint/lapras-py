@@ -20,15 +20,20 @@ class Agent:
         self.mqtt_client = mqtt.Client()
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message
+        
+        # Start MQTT client loop BEFORE connecting
+        self.mqtt_client.loop_start()
+        
+        # Now connect
         self.mqtt_client.connect(mqtt_broker, mqtt_port)
+        
+        # Wait a moment for connection to establish
+        time.sleep(0.5)
         
         # Start threads
         self.running = True
         self.perception_thread = threading.Thread(target=self._perception_loop)
         self.publish_thread = threading.Thread(target=self._publish_loop)
-        
-        # Start MQTT client loop
-        self.mqtt_client.loop_start()
         
         # Start all threads
         self.perception_thread.start()

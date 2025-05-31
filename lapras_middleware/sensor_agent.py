@@ -13,7 +13,7 @@ class SensorAgent(Agent, ABC):
     """Base class for individual sensor agents."""
     
     def __init__(self, sensor_id: str, sensor_type: str, virtual_agent_id: str, 
-                 mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+                 mqtt_broker: str = "localhost", mqtt_port: int = 1883):
         self.sensor_type = sensor_type
         self.virtual_agent_id = virtual_agent_id
         
@@ -63,7 +63,7 @@ class SensorAgent(Agent, ABC):
                 # Publish to MQTT using the proper topic from TopicManager
                 topic = TopicManager.sensor_to_virtual(self.agent_id, self.virtual_agent_id)
                 message = MQTTMessage.serialize(event)
-                self.mqtt_client.publish(topic, message)
+                self.mqtt_client.publish(topic, message, qos=1)  # Use QoS 1 for reliable delivery
                 logger.info(f"[{self.agent_id}] Published reading #{self.reading_count}: {value} {unit}")
                     
         except Exception as e:

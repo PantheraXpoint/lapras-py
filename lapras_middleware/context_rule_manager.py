@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class ContextRuleManager:
     """Combined context manager and rule executor that processes context states and applies rules."""
 
-    def __init__(self, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+    def __init__(self, mqtt_broker: str = "localhost", mqtt_port: int = 1883):
         """Initialize the combined context rule manager."""
         self.service_id = "ContextRuleManager"
         
@@ -34,11 +34,18 @@ class ContextRuleManager:
         # Track known virtual agents for dynamic topic subscription
         self.known_agents: set = set()
         
+        # Track last action commands sent to prevent redundancy
+        self.last_action_commands: Dict[str, Dict[str, Any]] = {}  # agent_id -> {action_name: params, timestamp: time}
+        self.action_command_lock = threading.Lock()
+        
         # Set up MQTT client with a unique client ID
         mqtt_client_id = f"{self.service_id}-{int(time.time()*1000)}"
         self.mqtt_client = mqtt.Client(client_id=mqtt_client_id)
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message
+        
+        # Enable logging for MQTT client (for debugging)
+        self.mqtt_client.enable_logger(logger)
         
         try:
             self.mqtt_client.connect(mqtt_broker, mqtt_port)
@@ -57,22 +64,24 @@ class ContextRuleManager:
             # Subscribe to updateContext events from all virtual agents using wildcard
             # Topic pattern: virtual/+/to/context/updateContext
             context_topic_pattern = "virtual/+/to/context/updateContext"
-            self.mqtt_client.subscribe(context_topic_pattern)
-            logger.info(f"[{self.service_id}] Subscribed to topic pattern: {context_topic_pattern}")
+            result = self.mqtt_client.subscribe(context_topic_pattern, qos=1)  # Use QoS 1 for reliable delivery
+            logger.info(f"[{self.service_id}] Subscribed to topic pattern: {context_topic_pattern} (result: {result})")
             
             # Subscribe to actionReport events from all virtual agents using wildcard
             # Topic pattern: virtual/+/to/context/actionReport
             report_topic_pattern = "virtual/+/to/context/actionReport"
-            self.mqtt_client.subscribe(report_topic_pattern)
-            logger.info(f"[{self.service_id}] Subscribed to topic pattern: {report_topic_pattern}")
+            result2 = self.mqtt_client.subscribe(report_topic_pattern, qos=1)  # Use QoS 1 for reliable delivery
+            logger.info(f"[{self.service_id}] Subscribed to topic pattern: {report_topic_pattern} (result: {result2})")
         else:
             logger.error(f"[{self.service_id}] Failed to connect to MQTT broker. Result code: {rc}")
 
     def _on_message(self, client, userdata, msg):
         """Callback when message is received from virtual agents."""
-        logger.debug(f"[{self.service_id}] Message received on topic '{msg.topic}'")
+        logger.info(f"[{self.service_id}] DEBUG: Message received on topic '{msg.topic}' with QoS {msg.qos}")
+        logger.debug(f"[{self.service_id}] Message payload: {msg.payload.decode()[:200]}...")  # First 200 chars
         try:
             event = MQTTMessage.deserialize(msg.payload.decode())
+            logger.info(f"[{self.service_id}] DEBUG: Event type: {event.event.type}, Source: {event.source.entityId}")
             
             if event.event.type == "updateContext":
                 # Handle updateContext event from VirtualAgent (ASYNCHRONOUS)
@@ -137,8 +146,8 @@ class ContextRuleManager:
     def _apply_rules_for_agent(self, agent_id: str, current_state: Dict[str, Any], timestamp: Any):
         """Apply rules for a specific agent immediately when context is updated."""
         try:
-            logger.info(f"[{self.service_id}] Processing rules for agent '{agent_id}'")
-            logger.debug(f"[{self.service_id}] State for '{agent_id}': {json.dumps(current_state, indent=2)}")
+            logger.debug(f"[{self.service_id}] Processing rules for agent '{agent_id}' (state updated)")
+            logger.debug(f"[{self.service_id}] Current state for '{agent_id}': {json.dumps(current_state, indent=2)}")
             
             state_after_rules = self.evaluate_rules(agent_id, current_state)
 
@@ -148,14 +157,17 @@ class ContextRuleManager:
                     # Determine what actions need to be taken based on state changes
                     actions_to_execute = self._determine_actions_from_state_change(current_state, state_after_rules)
                     
-                    for action in actions_to_execute:
-                        self._send_action_command(agent_id, action["actionName"], action.get("parameters"))
-                    
-                    logger.info(f"[{self.service_id}] State for agent '{agent_id}' CHANGED by rules. Sent {len(actions_to_execute)} action commands.")
+                    if actions_to_execute:
+                        logger.info(f"[{self.service_id}] Rules triggered {len(actions_to_execute)} action(s) for agent '{agent_id}'")
+                        
+                        for action in actions_to_execute:
+                            self._send_action_command(agent_id, action["actionName"], action.get("parameters"))
+                    else:
+                        logger.debug(f"[{self.service_id}] Rules processed for agent '{agent_id}' but no actions determined")
                 else:
-                    logger.info(f"[{self.service_id}] Rules evaluated for agent '{agent_id}', but resulting state is IDENTICAL to original. No actions sent.")
+                    logger.debug(f"[{self.service_id}] Rules evaluated for agent '{agent_id}', but resulting state is IDENTICAL to original")
             else:
-                logger.info(f"[{self.service_id}] No applicable rules resulted in a state change for agent '{agent_id}', or an error occurred in evaluation.")
+                logger.debug(f"[{self.service_id}] No applicable rules resulted in a state change for agent '{agent_id}'")
                 
         except Exception as e:
             logger.error(f"[{self.service_id}] Error applying rules for agent '{agent_id}': {e}", exc_info=True)
@@ -187,9 +199,43 @@ class ContextRuleManager:
         
         return actions
 
+    def _is_action_redundant(self, agent_id: str, action_name: str, parameters: Optional[Dict[str, Any]] = None) -> bool:
+        """Check if this action command is redundant (same as the last one sent)."""
+        with self.action_command_lock:
+            if agent_id not in self.last_action_commands:
+                return False  # No previous command, so not redundant
+            
+            last_command = self.last_action_commands[agent_id]
+            
+            # Check if it's the same action with the same parameters
+            if (last_command.get("action_name") == action_name and 
+                last_command.get("parameters") == parameters):
+                
+                # Also check if it was sent recently (within last 5 seconds)
+                # This prevents sending the same command due to rapid sensor updates
+                time_since_last = time.time() - last_command.get("timestamp", 0)
+                if time_since_last < 5.0:  # 5 second cooldown
+                    return True  # Redundant
+            
+            return False  # Not redundant
+    
+    def _record_action_command(self, agent_id: str, action_name: str, parameters: Optional[Dict[str, Any]] = None):
+        """Record that we sent this action command to prevent future redundancy."""
+        with self.action_command_lock:
+            self.last_action_commands[agent_id] = {
+                "action_name": action_name,
+                "parameters": parameters,
+                "timestamp": time.time()
+            }
+
     def _send_action_command(self, agent_id: str, action_name: str, parameters: Optional[Dict[str, Any]] = None):
         """Send an action command to a VirtualAgent (SYNCHRONOUS - Request)."""
         try:
+            # Check if this action command is redundant
+            if self._is_action_redundant(agent_id, action_name, parameters):
+                logger.info(f"[{self.service_id}] Skipping redundant action command '{action_name}' to agent '{agent_id}'")
+                return
+            
             # Create applyAction event
             action_event = EventFactory.create_action_event(
                 virtual_agent_id=agent_id,
@@ -200,7 +246,10 @@ class ContextRuleManager:
             # Publish to the agent's action topic
             action_topic = TopicManager.context_to_virtual_action(agent_id)
             action_message = MQTTMessage.serialize(action_event)
-            self.mqtt_client.publish(action_topic, action_message)
+            self.mqtt_client.publish(action_topic, action_message, qos=1)  # Use QoS 1 for reliable delivery
+            
+            # Record this command to prevent future redundancy
+            self._record_action_command(agent_id, action_name, parameters)
             
             logger.info(f"[{self.service_id}] Sent action command '{action_name}' to agent '{agent_id}' on topic '{action_topic}'")
             
@@ -224,14 +273,13 @@ class ContextRuleManager:
             """
             new_state_after_all_rules = current_state.copy()
             any_rule_led_to_actionable_change = False
-            logger.debug(f"[{self.service_id}] Evaluating rules for agent '{agent_id}' with initial state: {json.dumps(current_state, indent=2)}")
 
             for rule_uri, action_uri in self.rules_graph.query(
                 agent_specific_rules_query,
                 initBindings={'agent_id_param': agent_id_rdf_literal}
             ):
                 rule_name_short = str(rule_uri).split('/')[-1] or str(rule_uri)
-                logger.info(f"[{self.service_id}] Considering rule '{rule_name_short}' (URI: {rule_uri}) for agent '{agent_id}'")
+                logger.debug(f"[{self.service_id}] Checking rule '{rule_name_short}' for agent '{agent_id}'")
 
                 rule_conditions_query = """
                 SELECT ?condition_node
@@ -242,21 +290,19 @@ class ContextRuleManager:
                 ))
 
                 if not conditions_for_this_rule:
-                    logger.info(f"[{self.service_id}] Rule '{rule_name_short}' has no 'lapras:hasCondition' predicates. Skipping.")
+                    logger.debug(f"[{self.service_id}] Rule '{rule_name_short}' has no conditions - skipping")
                     continue
 
                 all_conditions_met_for_this_rule = True
                 for i, condition_row in enumerate(conditions_for_this_rule):
                     condition_node = condition_row[0]
-                    condition_name_short = str(condition_node).split('/')[-1] or str(condition_node)
-                    logger.debug(f"[{self.service_id}]   Checking condition #{i+1} ('{condition_name_short}') for rule '{rule_name_short}'")
                     if not self._evaluate_condition(condition_node, current_state):
                         all_conditions_met_for_this_rule = False
-                        logger.info(f"[{self.service_id}]   Condition '{condition_name_short}' for rule '{rule_name_short}' was FALSE. Rule will not trigger.")
+                        logger.debug(f"[{self.service_id}] Rule '{rule_name_short}' condition #{i+1} failed")
                         break
 
                 if all_conditions_met_for_this_rule:
-                    logger.info(f"[{self.service_id}] Rule '{rule_name_short}' ALL {len(conditions_for_this_rule)} conditions met for agent '{agent_id}'")
+                    logger.info(f"[{self.service_id}] Rule '{rule_name_short}' ALL conditions met - applying action")
                     action_data = self._parse_action(action_uri)
                     if action_data and "state_update" in action_data:
                         state_update_payload = action_data["state_update"]
@@ -269,24 +315,20 @@ class ContextRuleManager:
                                     break
                             
                             if changed_by_this_action:
-                                logger.info(f"[{self.service_id}] Action for rule '{rule_name_short}' provides state_update: {json.dumps(state_update_payload, indent=2)}")
+                                logger.info(f"[{self.service_id}] Applying state update for rule '{rule_name_short}': {json.dumps(state_update_payload)}")
                                 new_state_after_all_rules.update(state_update_payload)
                                 any_rule_led_to_actionable_change = True
-                                logger.info(f"[{self.service_id}] Agent '{agent_id}' state after rule '{rule_name_short}': {json.dumps(new_state_after_all_rules, indent=2)}")
                             else:
-                                logger.info(f"[{self.service_id}] Action for rule '{rule_name_short}' triggered, but state_update {json.dumps(state_update_payload, indent=2)} does not change current aggregated state for '{agent_id}'.")
+                                logger.debug(f"[{self.service_id}] Rule '{rule_name_short}' state update doesn't change current state")
                         else:
-                            logger.warning(f"[{self.service_id}] Rule '{rule_name_short}' state_update payload is not a dictionary: {state_update_payload}. Action URI: {action_uri}")
-                    elif action_data is None:
-                        logger.warning(f"[{self.service_id}] Rule '{rule_name_short}' conditions met, but _parse_action returned None. Action URI: {action_uri}")
+                            logger.warning(f"[{self.service_id}] Rule '{rule_name_short}' state_update is not a dictionary")
                     else:
-                        logger.warning(f"[{self.service_id}] Rule '{rule_name_short}' conditions met, but parsed action_data missing 'state_update'. Action URI: {action_uri}, Data: {action_data}")
+                        logger.warning(f"[{self.service_id}] Rule '{rule_name_short}' missing state_update data")
 
             if any_rule_led_to_actionable_change:
-                logger.info(f"[{self.service_id}] Final cumulative state for agent '{agent_id}' after all rules: {json.dumps(new_state_after_all_rules, indent=2)}")
+                logger.info(f"[{self.service_id}] Final state for agent '{agent_id}' after rules: {json.dumps(new_state_after_all_rules)}")
                 return new_state_after_all_rules
             else:
-                logger.info(f"[{self.service_id}] No rules triggered an actual state_update for agent '{agent_id}'.")
                 return None
         except Exception as e:
             logger.error(f"[{self.service_id}] Critical error in evaluate_rules for agent '{agent_id}': {e}", exc_info=True)
@@ -308,7 +350,7 @@ class ContextRuleManager:
             ))
 
             if not query_results:
-                logger.warning(f"[{self.service_id}] No specific (sensor, operator, value) found for condition node {condition_node} in RDF graph.")
+                logger.debug(f"[{self.service_id}] No sensor/operator/value found for condition {condition_node}")
                 return False
             
             sensor_rdf, operator_rdf, value_rdf_node = query_results[0]
@@ -319,17 +361,15 @@ class ContextRuleManager:
             value_from_agent_state = current_agent_state.get(sensor_id_from_rule)
 
             if value_from_agent_state is None:
-                logger.info(f"[{self.service_id}] Sensor '{sensor_id_from_rule}' (for condition '{condition_node}') not found in agent state: {current_agent_state}")
+                logger.debug(f"[{self.service_id}] Sensor '{sensor_id_from_rule}' not found in agent state")
                 return False
 
             rule_threshold_value = None
             if isinstance(value_rdf_node, rdflib.Literal):
                 rule_threshold_value = value_rdf_node.value
             else:
-                logger.warning(f"[{self.service_id}] Rule value for sensor '{sensor_id_from_rule}' in condition '{condition_node}' is not an RDF Literal: {value_rdf_node}")
+                logger.debug(f"[{self.service_id}] Rule value for '{sensor_id_from_rule}' is not a literal")
                 return False
-            
-            logger.debug(f"[{self.service_id}]   Cond Check Details: Sensor='{sensor_id_from_rule}', Op='{operator_str}', AgentVal='{value_from_agent_state}' (type {type(value_from_agent_state).__name__}), RuleVal='{rule_threshold_value}' (type {type(rule_threshold_value).__name__})")
             
             result = False
             try:
@@ -357,17 +397,20 @@ class ContextRuleManager:
                     except (ValueError, TypeError):
                         result = str(value_from_agent_state) != str(rule_threshold_value)
                 else:
-                    logger.warning(f"[{self.service_id}] Unsupported operator '{operator_str}' for comparison in condition '{condition_node}'.")
+                    logger.debug(f"[{self.service_id}] Unsupported operator '{operator_str}'")
                     return False
             except (ValueError, TypeError) as e:
-                logger.warning(f"[{self.service_id}] Type error during comparison for sensor '{sensor_id_from_rule}' in condition '{condition_node}': {e}. AgentVal='{value_from_agent_state}', RuleVal='{rule_threshold_value}'")
+                logger.debug(f"[{self.service_id}] Type error in condition evaluation: {e}")
                 return False
             
-            logger.debug(f"[{self.service_id}]   Condition evaluation: ('{value_from_agent_state}' {operator_str} '{rule_threshold_value}') = {result}")
+            # Only log condition details when they're true (to reduce log spam)
+            if result:
+                logger.debug(f"[{self.service_id}] Condition TRUE: '{value_from_agent_state}' {operator_str} '{rule_threshold_value}'")
+            
             return result 
             
         except Exception as e:
-            logger.error(f"[{self.service_id}] Error evaluating condition node '{condition_node}': {e}", exc_info=True)
+            logger.error(f"[{self.service_id}] Error evaluating condition: {e}", exc_info=True)
             return False
 
     def _parse_action(self, action_uri: rdflib.term.Node) -> Optional[Dict[str, Any]]:

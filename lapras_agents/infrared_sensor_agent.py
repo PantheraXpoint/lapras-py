@@ -17,7 +17,7 @@ class InfraredSensorAgent(SensorAgent):
     """Infrared distance sensor agent using Phidget sensor."""
     
     def __init__(self, sensor_id: str = "infrared_1", virtual_agent_id: str = "aircon", 
-                 mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+                 mqtt_broker: str = "localhost", mqtt_port: int = 1883):
         # Phidget sensor
         self.ir_sensor: Optional[VoltageRatioInput] = None
         self._phidget_initialized_successfully = False
