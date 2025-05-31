@@ -16,15 +16,20 @@ class Agent:
         self.local_state: Dict[str, Any] = {}
         self.state_lock = threading.Lock()  # Lock for thread-safe state access
         
-        # Set up MQTT client
-        self.mqtt_client = mqtt.Client()
+        # Set up MQTT client with explicit client ID to avoid conflicts
+        client_id = f"{self.agent_id}_{int(time.time()*1000)}"  # Unique client ID
+        self.mqtt_client = mqtt.Client(client_id=client_id)
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message
+        
+        # Add logging callback to debug MQTT issues
+        self.mqtt_client.on_log = self._on_log
         
         # Start MQTT client loop BEFORE connecting
         self.mqtt_client.loop_start()
         
         # Now connect
+        logger.info(f"[{self.agent_id}] Connecting to MQTT broker {mqtt_broker}:{mqtt_port} with client ID: {client_id}")
         self.mqtt_client.connect(mqtt_broker, mqtt_port)
         
         # Wait a moment for connection to establish
@@ -39,23 +44,28 @@ class Agent:
         self.perception_thread.start()
         self.publish_thread.start()
     
+    def _on_log(self, client, userdata, level, buf):
+        """MQTT logging callback for debugging."""
+        logger.debug(f"[{self.agent_id}] MQTT Log: {buf}")
+    
     def _on_connect(self, client, userdata, flags, rc):
         """Callback when connected to MQTT broker."""
-        logger.info(f"Connected to MQTT broker with result code {rc}")
+        logger.info(f"[{self.agent_id}] Connected to MQTT broker with result code {rc}")
         # Subscribe to context distribution channel
         self.mqtt_client.subscribe("context_dist")
     
     def _on_message(self, client, userdata, msg):
         """Callback when message is received from MQTT broker."""
         try:
+            logger.debug(f"[{self.agent_id}] Base Agent received MQTT message on topic: {msg.topic}")
             data = json.loads(msg.payload.decode())
             if data.get("agent_id") == self.agent_id:
                 # Update local state with received data
                 with self.state_lock:
                     self.local_state.update(data.get("state", {}))
-                logger.info(f"Updated local state from message: {data}")
+                logger.info(f"[{self.agent_id}] Updated local state from message: {data}")
         except Exception as e:
-            logger.error(f"Error processing message: {e}")
+            logger.error(f"[{self.agent_id}] Error processing message: {e}")
     
     def perception(self) -> None:
         """Update local state based on sensor readings. Override this method."""

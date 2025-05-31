@@ -27,6 +27,14 @@ class SensorAgent(Agent, ABC):
         
         logger.info(f"[{self.agent_id}] SensorAgent initialized for virtual agent {self.virtual_agent_id}")
     
+    def _on_connect(self, client, userdata, flags, rc):
+        """Override Agent's _on_connect to avoid conflicting subscriptions."""
+        # DON'T call parent's _on_connect to avoid subscribing to "context_dist"
+        # super()._on_connect(client, userdata, flags, rc)  # REMOVED to fix conflicts
+        
+        logger.info(f"[{self.agent_id}] SensorAgent MQTT connected with result code {rc}")
+        # SensorAgents only publish, they don't need to subscribe to anything
+    
     def set_reading_interval(self, interval: float):
         """Set the sensor reading interval in seconds."""
         self.reading_interval = interval
@@ -63,7 +71,7 @@ class SensorAgent(Agent, ABC):
                 # Publish to MQTT using the proper topic from TopicManager
                 topic = TopicManager.sensor_to_virtual(self.agent_id, self.virtual_agent_id)
                 message = MQTTMessage.serialize(event)
-                self.mqtt_client.publish(topic, message, qos=1)  # Use QoS 1 for reliable delivery
+                self.mqtt_client.publish(topic, message, qos=1)  # Back to QoS 1 to test if QoS 2 was the issue
                 logger.info(f"[{self.agent_id}] Published reading #{self.reading_count}: {value} {unit}")
                     
         except Exception as e:
