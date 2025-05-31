@@ -61,7 +61,7 @@ class Agent:
         while self.running:
             try:
                 self.perception()
-                time.sleep(1)  # Update every second
+                time.sleep(0.1)  # Update every 100ms for responsive sensor reading
             except Exception as e:
                 logger.error(f"Error in perception loop: {e}")
     
