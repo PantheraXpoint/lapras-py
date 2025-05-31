@@ -7,7 +7,7 @@ import os
 # Add the project root to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from lapras_agents.aircon_agent import AirconAgent
+from lapras_agents.infrared_sensor_agent import InfraredSensorAgent
 
 def main():
     # Set up logging
@@ -18,22 +18,25 @@ def main():
     logger = logging.getLogger(__name__)
     
     try:
-        # Initialize aircon virtual agent
-        agent = AirconAgent(agent_id="aircon")
-        logger.info("[AIRCON_VIRTUAL] Aircon virtual agent initialized and started")
+        # Initialize infrared sensor agent
+        agent = InfraredSensorAgent(
+            sensor_id="infrared_1",
+            virtual_agent_id="aircon"
+        )
+        logger.info("[INFRARED_SENSOR] Infrared sensor agent initialized and started")
         
         # Keep the main thread alive
         while True:
             time.sleep(1)
             
     except KeyboardInterrupt:
-        logger.info("[AIRCON_VIRTUAL] Received keyboard interrupt")
+        logger.info("[INFRARED_SENSOR] Received keyboard interrupt")
     except Exception as e:
-        logger.error(f"[AIRCON_VIRTUAL] Error in aircon virtual agent: {e}")
+        logger.error(f"[INFRARED_SENSOR] Error in infrared sensor agent: {e}")
     finally:
         if 'agent' in locals():
             agent.stop()
-        logger.info("[AIRCON_VIRTUAL] Aircon virtual agent stopped")
+        logger.info("[INFRARED_SENSOR] Infrared sensor agent stopped")
 
 if __name__ == "__main__":
     main() 

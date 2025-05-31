@@ -33,18 +33,20 @@ class RuleExecutorService:
             self.logger.info("Event dispatcher initialized")
             
             # Initialize MQTT communicator
-            self.mqtt_communicator = MqttCommunicator(
-                event_dispatcher=self.event_dispatcher,
-                broker="localhost",
-                port=1883,
-                client_id="rule_executor"
-            )
+            # self.mqtt_communicator = MqttCommunicator(
+            #     event_dispatcher=self.event_dispatcher,
+            #     broker="localhost",
+            #     port=1883,
+            #     client_id="rule_executor"
+            # )
             self.logger.info("MQTT communicator initialized")
             
             # Initialize rule executor
             self.rule_executor = RuleExecutor(
-                event_dispatcher=self.event_dispatcher,
-                mqtt_communicator=self.mqtt_communicator
+                # event_dispatcher=self.event_dispatcher,
+                # mqtt_communicator=self.mqtt_communicator
+                broker="localhost",
+                port=1883
             )
             self.logger.info("Rule executor initialized")
             
