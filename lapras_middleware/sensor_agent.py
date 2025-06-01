@@ -58,21 +58,22 @@ class SensorAgent(Agent, ABC):
             if value is not None:
                 self.reading_count += 1
                 
-                # Create readSensor event using EventFactory (ASYNCHRONOUS)
+                # Create readSensor event using EventFactory (ASYNCHRONOUS - BROADCAST)
+                # No specific target virtual agent - this is a broadcast event
                 event = EventFactory.create_sensor_event(
                     sensor_id=self.agent_id,
-                    virtual_agent_id=self.virtual_agent_id,
+                    virtual_agent_id="*",  # Broadcast to all interested virtual agents
                     sensor_type=self.sensor_type,
                     value=value,
                     unit=unit,
                     metadata=metadata
                 )
                 
-                # Publish to MQTT using the proper topic from TopicManager
-                topic = TopicManager.sensor_to_virtual(self.agent_id, self.virtual_agent_id)
+                # Publish to MQTT using the broadcast topic pattern
+                topic = TopicManager.sensor_broadcast(self.agent_id)
                 message = MQTTMessage.serialize(event)
-                self.mqtt_client.publish(topic, message, qos=1)  # Back to QoS 1 to test if QoS 2 was the issue
-                logger.info(f"[{self.agent_id}] Published reading #{self.reading_count}: {value} {unit}")
+                self.mqtt_client.publish(topic, message, qos=1)
+                logger.info(f"[{self.agent_id}] Published reading #{self.reading_count}: {value} {unit} to broadcast topic: {topic}")
                     
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error reading/publishing sensor data: {e}")

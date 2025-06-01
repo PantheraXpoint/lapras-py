@@ -53,14 +53,14 @@ class VirtualAgent(Agent, ABC):
             
             # Subscribe to action commands from ContextRuleManager (SYNCHRONOUS - Request)
             action_topic = TopicManager.context_to_virtual_action(self.agent_id)
-            client.subscribe(action_topic, qos=1)  # Back to QoS 1 to test if QoS 2 was the issue
+            client.subscribe(action_topic, qos=1)
             logger.info(f"[{self.agent_id}] Subscribed to action topic: {action_topic}")
             
-            # Subscribe to sensor data from all managed sensors (ASYNCHRONOUS)
+            # Subscribe to sensor broadcast topics from all managed sensors (ASYNCHRONOUS - one-to-many)
             for sensor_id in self.sensor_agents:
-                sensor_topic = TopicManager.sensor_to_virtual(sensor_id, self.agent_id)
-                result = client.subscribe(sensor_topic, qos=1)  # Back to QoS 1 to test if QoS 2 was the issue
-                logger.info(f"[{self.agent_id}] Subscribed to sensor topic: {sensor_topic} (result: {result})")
+                sensor_topic = TopicManager.sensor_broadcast(sensor_id)
+                result = client.subscribe(sensor_topic, qos=1)
+                logger.info(f"[{self.agent_id}] Subscribed to sensor broadcast topic: {sensor_topic} (result: {result})")
         else:
             logger.error(f"[{self.agent_id}] MQTT connection failed with code {rc}")
     
@@ -90,7 +90,7 @@ class VirtualAgent(Agent, ABC):
             # Check if it's sensor data (ASYNCHRONOUS)
             sensor_message_handled = False
             for sensor_id in self.sensor_agents:
-                sensor_topic = TopicManager.sensor_to_virtual(sensor_id, self.agent_id)
+                sensor_topic = TopicManager.sensor_broadcast(sensor_id)
                 if topic == sensor_topic:
                     logger.info(f"[{self.agent_id}] DEBUG: Processing sensor data message from {sensor_id}")
                     try:
@@ -248,9 +248,9 @@ class VirtualAgent(Agent, ABC):
             
             # Only subscribe if MQTT is already connected to avoid double subscription
             if self.mqtt_client.is_connected():
-                sensor_topic = TopicManager.sensor_to_virtual(sensor_id, self.agent_id)
-                result = self.mqtt_client.subscribe(sensor_topic, qos=1)  # Back to QoS 1 to test if QoS 2 was the issue
-                logger.info(f"[{self.agent_id}] Subscribed to sensor topic: {sensor_topic} (result: {result})")
+                sensor_topic = TopicManager.sensor_broadcast(sensor_id)
+                result = self.mqtt_client.subscribe(sensor_topic, qos=1)
+                logger.info(f"[{self.agent_id}] Subscribed to sensor broadcast topic: {sensor_topic} (result: {result})")
             else:
                 logger.info(f"[{self.agent_id}] MQTT not connected yet, will subscribe in _on_connect")
     
@@ -260,9 +260,9 @@ class VirtualAgent(Agent, ABC):
             self.sensor_agents.remove(sensor_id)
             
             # Unsubscribe from the sensor's topic
-            sensor_topic = TopicManager.sensor_to_virtual(sensor_id, self.agent_id)
+            sensor_topic = TopicManager.sensor_broadcast(sensor_id)
             self.mqtt_client.unsubscribe(sensor_topic)
-            logger.info(f"[{self.agent_id}] Unsubscribed from sensor topic: {sensor_topic}")
+            logger.info(f"[{self.agent_id}] Unsubscribed from sensor broadcast topic: {sensor_topic}")
             
             # Remove sensor data
             with self.state_lock:

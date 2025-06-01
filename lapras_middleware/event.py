@@ -273,9 +273,9 @@ class TopicManager:
     
     # ASYNCHRONOUS/CONTINUOUS TOPICS
     @staticmethod
-    def sensor_to_virtual(sensor_id: str, virtual_agent_id: str) -> str:
-        """Topic for readSensor events from SensorAgent to VirtualAgent (ASYNCHRONOUS)."""
-        return f"sensor/{sensor_id}/to/{virtual_agent_id}/readSensor"
+    def sensor_broadcast(sensor_id: str) -> str:
+        """Topic for readSensor events broadcasted by SensorAgent (ASYNCHRONOUS - one-to-many)."""
+        return f"sensor/{sensor_id}/readSensor"
     
     @staticmethod
     def virtual_to_context(virtual_agent_id: str) -> str:
