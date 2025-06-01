@@ -273,6 +273,7 @@ class ContextRuleManager:
             """
             new_state_after_all_rules = current_state.copy()
             any_rule_led_to_actionable_change = False
+            logger.info(f"[{self.service_id}] Evaluating rules for agent '{agent_id}'")
 
             for rule_uri, action_uri in self.rules_graph.query(
                 agent_specific_rules_query,

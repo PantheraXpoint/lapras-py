@@ -23,13 +23,13 @@ lapras:SetAirconPowerOff lapras:hasStateUpdate '{"power": "off"}' .
 
 # --- Hue light rule
 lapras:HueLightOnWhenNearRule a lapras:Rule ;
-    lapras:hasAgent "hue_light" ;
+    lapras:hasAgent "hue_light_1" ;
     lapras:hasCondition lapras:IsNearCondition ;
     lapras:hasAction lapras:SetHueLightPowerOn .
 lapras:SetHueLightPowerOn lapras:hasStateUpdate '{"power": "on"}' .
 
 lapras:HueLightOffWhenFarRule a lapras:Rule ;
-    lapras:hasAgent "hue_light" ;
+    lapras:hasAgent "hue_light_1" ;
     lapras:hasCondition lapras:IsFarCondition ;
     lapras:hasAction lapras:SetHueLightPowerOff .
 
