@@ -12,7 +12,7 @@ from lapras_middleware.event import ActionPayload, SensorPayload
 logger = logging.getLogger(__name__)
 
 class AirconAgent(VirtualAgent):
-    def __init__(self, agent_id: str = "aircon", mqtt_broker: str = "localhost", mqtt_port: int = 1883):
+    def __init__(self, agent_id: str = "aircon", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
         super().__init__(agent_id, "aircon", mqtt_broker, mqtt_port)
         
         logger.info(f"[{self.agent_id}] AirconAgent initialized")

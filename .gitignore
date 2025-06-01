@@ -29,4 +29,3 @@ lapras_agents/ir_agent.py
 lapras_agents/light_agent.py
 lapras_agents/microwave_control_agent.py
 lapras_agents/smart_aircon_agent.py
-lapras_middleware/virtual_agent.py
