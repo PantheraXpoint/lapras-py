@@ -23,7 +23,7 @@ class LightHueAgent(VirtualAgent):
 
         with self.state_lock:
             self.local_state.update({
-                "power": "off",
+                "power": "on",
                 "proximity_status": "unknown",
             })
         
@@ -145,6 +145,9 @@ class LightHueAgent(VirtualAgent):
         USERNAME = "P2laHGvjzthn7Ip5-fAAIbVB9ulu9OlHWk8L7Yex"
         BASE_URL = f"http://{BRIDGE_IP}/api/{USERNAME}"
         idx = self.agent_id.split("_")[-1]
+        
+        logger.info(f"[{self.agent_id}] DEBUG: About to turn off light {idx}")
+
         url = f"{BASE_URL}/lights/{idx}/state"
         data = json.dumps({"on": True}).encode("utf-8")
         req = urllib.request.Request(url, data=data, method="PUT")
@@ -166,6 +169,9 @@ class LightHueAgent(VirtualAgent):
         USERNAME = "P2laHGvjzthn7Ip5-fAAIbVB9ulu9OlHWk8L7Yex"
         BASE_URL = f"http://{BRIDGE_IP}/api/{USERNAME}"
         idx = self.agent_id.split("_")[-1]
+
+        logger.info(f"[{self.agent_id}] DEBUG: About to turn off light {idx}")
+
         url = f"{BASE_URL}/lights/{idx}/state"
         data = json.dumps({"on": False}).encode("utf-8")
         req = urllib.request.Request(url, data=data, method="PUT")

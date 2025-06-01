@@ -303,14 +303,16 @@ class ContextRuleManager:
                         break
 
                 if all_conditions_met_for_this_rule:
-                    logger.info(f"[{self.service_id}] Rule '{rule_name_short}' ALL conditions met - applying action")
                     action_data = self._parse_action(action_uri)
+                    logger.info(f"[{self.service_id}] Rule '{rule_name_short}' Action '{action_data}' ALL conditions met - applying action")
+
                     if action_data and "state_update" in action_data:
                         state_update_payload = action_data["state_update"]
                         if isinstance(state_update_payload, dict):
                             # Check if the state update actually changes anything
                             changed_by_this_action = False
                             for key, value in state_update_payload.items():
+                                logger.info(f"[{self.service_id}] Rule '{rule_name_short}' state update changes {key} from {new_state_after_all_rules.get(key)} to {value}")
                                 if new_state_after_all_rules.get(key) != value:
                                     changed_by_this_action = True
                                     break
