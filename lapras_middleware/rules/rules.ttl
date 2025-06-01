@@ -19,3 +19,18 @@ lapras:AirconOffWhenFarRule a lapras:Rule ;
 lapras:IsFarCondition
     lapras:hasSensor "proximity_status" ; lapras:hasOperator lapras:equals ; lapras:hasValue "far" .
 lapras:SetAirconPowerOff lapras:hasStateUpdate '{"power": "off"}' .
+
+
+# --- Hue light rule
+lapras:HueLightOnWhenNearRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsNearCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOn .
+lapras:SetHueLightPowerOn lapras:hasStateUpdate '{"power": "on"}' .
+
+lapras:HueLightOffWhenFarRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsFarCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOff .
+
+lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' .

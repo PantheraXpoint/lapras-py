@@ -7,7 +7,7 @@ import os
 # Add the project root to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from lapras_agents.aircon_agent import AirconAgent
+from lapras_agents.light_hue_agent import LightHueAgent
 
 def main():
     # Set up logging
@@ -19,7 +19,7 @@ def main():
     
     try:
         # Initialize aircon virtual agent
-        agent = AirconAgent(agent_id="aircon")
+        agent = LightHueAgent(agent_id="hue_light_1")
         logger.info("[AIRCON_VIRTUAL] Aircon virtual agent initialized and started")
         
         # Keep the main thread alive
