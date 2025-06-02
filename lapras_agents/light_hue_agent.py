@@ -42,9 +42,11 @@ class LightHueAgent(VirtualAgent):
                 "unit": sensor_payload.unit,
                 "metadata": sensor_payload.metadata,
             }
-                
+
+            assert (sensor_payload.metadata is not None), f"[{self.agent_id}] Sensor metadata is None for infrared sensor {sensor_id}"
             # Update proximity status based on infrared sensor
-            if sensor_payload.metadata and "proximity_status" in sensor_payload.metadata:
+            if (sensor_payload.metadata is not None) and ("proximity_status" in sensor_payload.metadata):
+                logger.info(f"[{self.agent_id}] Processing infrared sensor update: {sensor_payload.value}{sensor_payload.unit}, metadata={sensor_payload.metadata}")
                 old_proximity = None
                 old_distance = None
                 with self.state_lock:
@@ -52,8 +54,11 @@ class LightHueAgent(VirtualAgent):
                     old_distance = self.local_state.get("distance")
                     self.local_state["proximity_status"] = sensor_payload.metadata["proximity_status"]
                     self.local_state["distance"] = sensor_payload.value
+                logger.info(f"[{self.agent_id}] Updated local state: proximity_status={self.local_state['proximity_status']}, distance={self.local_state['distance']}")
                 
                 # Only log and trigger publication if something actually changed
+                # TODO(YH): only used for debugging
+                # old_distance = 0
                 if (old_proximity != sensor_payload.metadata["proximity_status"] or 
                     old_distance != sensor_payload.value):
                     logger.info(f"[{self.agent_id}] Updated from IR sensor: distance={sensor_payload.value}{sensor_payload.unit}, proximity={sensor_payload.metadata['proximity_status']}")
@@ -85,7 +90,7 @@ class LightHueAgent(VirtualAgent):
         
         logger.info(f"[{self.agent_id}] DEBUG: About to acquire state_lock")
         with self.state_lock:
-            logger.info(f"[{self.agent_id}] DEBUG: state_lock acquired")
+            # logger.info(f"[{self.agent_id}] DEBUG: state_lock acquired")
             old_sensor_data = self.sensor_data.get(sensor_id, {})
             
             # Store new sensor data
@@ -99,7 +104,7 @@ class LightHueAgent(VirtualAgent):
             
             # Check if proximity status changed for infrared sensors
             if sensor_payload.sensor_type == "infrared" and sensor_payload.metadata:
-                assert isinstance(old_sensor_data, dict), f"[YUHENG]meta is {old_sensor_data}, sensor_payload metadata is {sensor_payload.metadata}"
+                assert isinstance(old_sensor_data, dict), f"[YUHENG] meta is {old_sensor_data}, sensor_payload metadata is {sensor_payload.metadata}"
                 old_proximity = old_sensor_data.get("metadata", {}).get("proximity_status") if old_sensor_data else None
                 new_proximity = sensor_payload.metadata.get("proximity_status")
                 
@@ -160,9 +165,9 @@ class LightHueAgent(VirtualAgent):
                     "power": "on"
                 }
             }
-            return ret
+        return ret
     
-    def turn_off_light(self):
+    def __turn_off_light(self):
         # Replace with your bridge IP and API username
         # NOTE(YH): hardcode for now
         BRIDGE_IP = "143.248.56.213:10090"
@@ -184,7 +189,7 @@ class LightHueAgent(VirtualAgent):
                     "power": "off"
                 }
             }
-            return ret
+        return ret
 
     def execute_action(self, action_payload: ActionPayload) -> dict:
         """Execute aircon control actions."""

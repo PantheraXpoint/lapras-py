@@ -287,7 +287,7 @@ class VirtualAgent(Agent, ABC):
                 qos = publish_request.get('qos', 1)
                 
                 # Perform the actual publish on this separate thread
-                logger.info(f"[{self.agent_id}] Publishing queued message to topic: {topic}")
+                # logger.info(f"[{self.agent_id}] Publishing queued message to topic: {topic}, {message}")
                 publish_result = self.mqtt_client.publish(topic, message, qos=qos)
                 logger.info(f"[{self.agent_id}] Queued publish result: {publish_result}")
                 

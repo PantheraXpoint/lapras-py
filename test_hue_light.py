@@ -92,12 +92,12 @@ def color_name_to_hue(color_name):
     return hue_api, sat, bri
 
 
-# Main logic
-if __name__ == "__main__":
-    light_ids = get_light_ids()
-    for light_id in light_ids:
-        turn_on_light(light_id)
-        print(light_id)
+# # Main logic
+# if __name__ == "__main__":
+#     light_ids = get_light_ids()
+#     for light_id in light_ids:
+#         turn_off_light(light_id)
+#         print(light_id)
 
 
 
@@ -110,19 +110,19 @@ if __name__ == "__main__":
 
 # # --- Main ---
 
-# if __name__ == "__main__":
-#     if len(sys.argv) != 2:
-#         print("Usage: python3 set_all_lights_color.py <color>")
-#         print("Example: python3 set_all_lights_color.py red")
-#         sys.exit(1)
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: python3 set_all_lights_color.py <color>")
+        print("Example: python3 set_all_lights_color.py red")
+        sys.exit(1)
 
-#     input_color = sys.argv[1]
-#     try:
-#         hue, sat, bri = color_name_to_hue(input_color)
-#     except ValueError as e:
-#         print(e)
-#         sys.exit(1)
+    input_color = sys.argv[1]
+    try:
+        hue, sat, bri = color_name_to_hue(input_color)
+    except ValueError as e:
+        print(e)
+        sys.exit(1)
 
-#     light_ids = get_light_ids()
-#     for light_id in light_ids:
-#         set_light_color(light_id, hue, sat, bri)
+    light_ids = get_light_ids()
+    for light_id in light_ids:
+        set_light_color(light_id, hue, sat, bri)

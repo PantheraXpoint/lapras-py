@@ -150,6 +150,7 @@ class ContextRuleManager:
             logger.debug(f"[{self.service_id}] Current state for '{agent_id}': {json.dumps(current_state, indent=2)}")
             
             state_after_rules = self.evaluate_rules(agent_id, current_state)
+            logger.info(f"[{self.service_id}] State after rules for agent '{agent_id}': {json.dumps(state_after_rules, indent=2) if state_after_rules else 'No change'}")
 
             if state_after_rules is not None:
                 # Only publish if the state actually changed as a result of the rules
