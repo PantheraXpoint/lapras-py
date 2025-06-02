@@ -149,22 +149,24 @@ class LightHueAgent(VirtualAgent):
         BRIDGE_IP = "143.248.56.213:10090"
         USERNAME = "P2laHGvjzthn7Ip5-fAAIbVB9ulu9OlHWk8L7Yex"
         BASE_URL = f"http://{BRIDGE_IP}/api/{USERNAME}"
-        idx = self.agent_id.split("_")[-1]
+        # idx = self.agent_id.split("_")[-1]
         
-        logger.info(f"[{self.agent_id}] DEBUG: About to turn off light {idx}")
+        # logger.info(f"[{self.agent_id}] DEBUG: About to turn off light {idx}")
+        idxs = list(range(0, 11))
 
-        url = f"{BASE_URL}/lights/{idx}/state"
-        data = json.dumps({"on": True}).encode("utf-8")
-        req = urllib.request.Request(url, data=data, method="PUT")
-        with urllib.request.urlopen(req) as response:
-            result = response.read().decode("utf-8")
-            ret = {
-                "success": True,
-                "message": f"Turned on light {self.agent_id}: {result}",
-                "new_state": {
-                    "power": "on"
+        for idx in idxs:
+            url = f"{BASE_URL}/lights/{idx}/state"
+            data = json.dumps({"on": True}).encode("utf-8")
+            req = urllib.request.Request(url, data=data, method="PUT")
+            with urllib.request.urlopen(req) as response:
+                result = response.read().decode("utf-8")
+                ret = {
+                    "success": True,
+                    "message": f"Turned on light {self.agent_id}: {result}",
+                    "new_state": {
+                        "power": "on"
+                    }
                 }
-            }
         return ret
     
     def __turn_off_light(self):
@@ -173,22 +175,25 @@ class LightHueAgent(VirtualAgent):
         BRIDGE_IP = "143.248.56.213:10090"
         USERNAME = "P2laHGvjzthn7Ip5-fAAIbVB9ulu9OlHWk8L7Yex"
         BASE_URL = f"http://{BRIDGE_IP}/api/{USERNAME}"
-        idx = self.agent_id.split("_")[-1]
+        # idx = self.agent_id.split("_")[-1]
 
-        logger.info(f"[{self.agent_id}] DEBUG: About to turn off light {idx}")
+        # logger.info(f"[{self.agent_id}] DEBUG: About to turn off light {idx}")
 
-        url = f"{BASE_URL}/lights/{idx}/state"
-        data = json.dumps({"on": False}).encode("utf-8")
-        req = urllib.request.Request(url, data=data, method="PUT")
-        with urllib.request.urlopen(req) as response:
-            result = response.read().decode("utf-8")
-            ret = {
-                "success": True,
-                "message": f"Turned off light {self.agent_id}: {result}",
-                "new_state": {
-                    "power": "off"
+        idxs = list(range(0, 11))
+
+        for idx in idxs:
+            url = f"{BASE_URL}/lights/{idx}/state"
+            data = json.dumps({"on": False}).encode("utf-8")
+            req = urllib.request.Request(url, data=data, method="PUT")
+            with urllib.request.urlopen(req) as response:
+                result = response.read().decode("utf-8")
+                ret = {
+                    "success": True,
+                    "message": f"Turned off light {self.agent_id}: {result}",
+                    "new_state": {
+                        "power": "off"
+                    }
                 }
-            }
         return ret
 
     def execute_action(self, action_payload: ActionPayload) -> dict:
