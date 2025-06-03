@@ -37,6 +37,17 @@ All MQTT messages use standardized data structures:
 - **ActionCommand**: Commands from ContextRuleManager to VirtualAgent
 - **ActionResult**: Results of action execution
 
+## Dashboard Development
+
+📱 **For Dashboard/Frontend Developers**: See **[Dashboard Interface Documentation](Dashboard_Interface_Documentation.md)** for complete MQTT interface, message formats, and code examples for building dashboard applications.
+
+The dashboard interface provides:
+- Real-time device state monitoring via MQTT
+- Manual device control commands  
+- Standardized Event message structure
+- Python and JavaScript client examples
+- WebSocket support for web dashboards
+
 ## Running the System
 
 ### 1. Start the ContextRuleManager

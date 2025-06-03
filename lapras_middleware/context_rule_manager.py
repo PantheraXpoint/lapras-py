@@ -3,13 +3,14 @@ import time
 import json
 import threading
 from typing import Dict, Any, Optional
+import uuid
 
 import paho.mqtt.client as mqtt
 import rdflib
 from rdflib import Graph, Literal, Namespace
 from rdflib.namespace import RDF, RDFS, XSD
 
-from .event import EventFactory, MQTTMessage, TopicManager, ContextPayload, ActionReportPayload
+from .event import EventFactory, MQTTMessage, TopicManager, ContextPayload, ActionReportPayload, Event, EventMetadata, EntityInfo
 
 logger = logging.getLogger(__name__)
 
@@ -72,14 +73,26 @@ class ContextRuleManager:
             report_topic_pattern = "virtual/+/to/context/actionReport"
             result2 = self.mqtt_client.subscribe(report_topic_pattern, qos=1)  # Use QoS 1 for reliable delivery
             logger.info(f"[{self.service_id}] Subscribed to topic pattern: {report_topic_pattern} (result: {result2})")
+            
+            # Subscribe to dashboard manual control commands
+            # Topic: dashboard/control/command
+            dashboard_control_topic = "dashboard/control/command"
+            result3 = self.mqtt_client.subscribe(dashboard_control_topic, qos=1)
+            logger.info(f"[{self.service_id}] Subscribed to dashboard control topic: {dashboard_control_topic} (result: {result3})")
         else:
             logger.error(f"[{self.service_id}] Failed to connect to MQTT broker. Result code: {rc}")
 
     def _on_message(self, client, userdata, msg):
-        """Callback when message is received from virtual agents."""
+        """Callback when message is received from virtual agents or dashboard."""
         logger.info(f"[{self.service_id}] DEBUG: Message received on topic '{msg.topic}' with QoS {msg.qos}")
         logger.debug(f"[{self.service_id}] Message payload: {msg.payload.decode()[:200]}...")  # First 200 chars
         try:
+            # Check if it's a dashboard control command
+            if msg.topic == "dashboard/control/command":
+                logger.info(f"[{self.service_id}] DEBUG: Processing dashboard control command")
+                self._handle_dashboard_control_command(msg.payload.decode())
+                return
+            
             event = MQTTMessage.deserialize(msg.payload.decode())
             logger.info(f"[{self.service_id}] DEBUG: Event type: {event.event.type}, Source: {event.source.entityId}")
             
@@ -96,6 +109,105 @@ class ContextRuleManager:
             logger.error(f"[{self.service_id}] Message payload on topic '{msg.topic}' was not valid JSON: {msg.payload.decode(errors='ignore')}")
         except Exception as e:
             logger.error(f"[{self.service_id}] Error processing message: {e}", exc_info=True)
+
+    def _handle_dashboard_control_command(self, message_payload: str):
+        """Handle manual control command from dashboard via MQTT."""
+        try:
+            # Parse as Event structure instead of custom JSON
+            event = MQTTMessage.deserialize(message_payload)
+            
+            if event.event.type != "dashboardCommand":
+                logger.error(f"[{self.service_id}] Expected dashboardCommand event type, got: {event.event.type}")
+                return
+            
+            logger.info(f"[{self.service_id}] Received dashboard control command: {event.event.id}")
+            
+            # Extract command details from payload
+            agent_id = event.payload.get('agent_id')
+            action_name = event.payload.get('action_name') 
+            parameters = event.payload.get('parameters')
+            priority = event.payload.get('priority', 'High')
+            command_id = event.event.id
+            
+            if not agent_id or not action_name:
+                logger.error(f"[{self.service_id}] Dashboard command missing required fields: {event.payload}")
+                self._publish_dashboard_command_result(command_id, False, "Missing agent_id or action_name", agent_id)
+                return
+            
+            # Check if agent exists
+            if agent_id not in self.known_agents:
+                logger.warning(f"[{self.service_id}] Dashboard command for unknown agent: {agent_id}")
+                self._publish_dashboard_command_result(command_id, False, f"Agent {agent_id} not found", agent_id)
+                return
+            
+            # Create and send action command
+            action_event = EventFactory.create_action_event(
+                virtual_agent_id=agent_id,
+                action_name=action_name,
+                parameters=parameters,
+                priority=priority
+            )
+            
+            # Send to virtual agent
+            action_topic = TopicManager.context_to_virtual_action(agent_id)
+            action_message = MQTTMessage.serialize(action_event)
+            publish_result = self.mqtt_client.publish(action_topic, action_message, qos=1)
+            
+            # Log the dashboard command for audit trail
+            logger.info(f"[{self.service_id}] DASHBOARD COMMAND sent to {agent_id}: {action_name}")
+            if parameters:
+                logger.info(f"[{self.service_id}] Command parameters: {parameters}")
+            logger.info(f"[{self.service_id}] Command ID: {action_event.event.id}, Priority: {priority}")
+            
+            # Publish success result back to dashboard
+            self._publish_dashboard_command_result(
+                command_id, True, 
+                f"Command '{action_name}' sent to {agent_id}", 
+                agent_id, action_event.event.id
+            )
+            
+        except json.JSONDecodeError:
+            logger.error(f"[{self.service_id}] Invalid JSON in dashboard command: {message_payload}")
+            self._publish_dashboard_command_result("unknown", False, "Invalid JSON format", None)
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error processing dashboard command: {e}", exc_info=True)
+            self._publish_dashboard_command_result("unknown", False, f"Error: {str(e)}", None)
+
+    def _publish_dashboard_command_result(self, command_id: str, success: bool, message: str, agent_id: Optional[str], action_event_id: Optional[str] = None):
+        """Publish command result back to dashboard via MQTT using Event structure."""
+        try:
+            # Create Event structure for command result
+            result_event = Event(
+                event=EventMetadata(
+                    id="",  # Auto-generated
+                    timestamp="",  # Auto-generated  
+                    type="dashboardCommandResult"
+                ),
+                source=EntityInfo(
+                    entityType="contextManager",
+                    entityId="CM-MainController"
+                ),
+                target=EntityInfo(
+                    entityType="dashboard",
+                    entityId="dashboard-client"
+                ),
+                payload={
+                    "command_id": command_id,
+                    "success": success,
+                    "message": message,
+                    "agent_id": agent_id,
+                    "action_event_id": action_event_id
+                }
+            )
+            
+            result_topic = "dashboard/control/result"
+            result_message = MQTTMessage.serialize(result_event)
+            self.mqtt_client.publish(result_topic, result_message, qos=1)
+            
+            logger.info(f"[{self.service_id}] Published dashboard command result: {command_id} - {success}")
+            
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error publishing dashboard command result: {e}")
 
     def _handle_context_update(self, event):
         """Handle updateContext event from VirtualAgent (ASYNCHRONOUS)."""
@@ -118,11 +230,64 @@ class ContextRuleManager:
             # Track this agent for future action commands
             self.known_agents.add(agent_id)
             
+            # Publish updated dashboard state
+            self._publish_dashboard_state_update()
+            
             # Immediately apply rules for this agent
             self._apply_rules_for_agent(agent_id, context_payload.state, event.event.timestamp)
             
         except Exception as e:
             logger.error(f"[{self.service_id}] Error handling context update: {e}", exc_info=True)
+
+    def _publish_dashboard_state_update(self):
+        """Publish current system state to dashboard via MQTT using Event structure."""
+        try:
+            with self.context_lock:
+                # Create Event structure for dashboard state
+                dashboard_state_event = Event(
+                    event=EventMetadata(
+                        id="",  # Auto-generated
+                        timestamp="",  # Auto-generated
+                        type="dashboardStateUpdate"
+                    ),
+                    source=EntityInfo(
+                        entityType="contextManager",
+                        entityId="CM-MainController"
+                    ),
+                    target=EntityInfo(
+                        entityType="dashboard",
+                        entityId="dashboard-client"
+                    ),
+                    payload={
+                        "agents": {},
+                        "summary": {
+                            "total_agents": len(self.context_map),
+                            "known_agents": list(self.known_agents),
+                            "last_update": time.time()
+                        }
+                    }
+                )
+                
+                # Add agent states to payload
+                for agent_id, agent_data in self.context_map.items():
+                    dashboard_state_event.payload["agents"][agent_id] = {
+                        "state": agent_data["state"],
+                        "agent_type": agent_data["agent_type"], 
+                        "sensors": agent_data["sensors"],
+                        "timestamp": agent_data["timestamp"],
+                        "last_update": agent_data["last_update"],
+                        "is_responsive": (time.time() - agent_data["last_update"]) < 300  # 5 minute timeout
+                    }
+            
+            # Publish using Event structure
+            dashboard_topic = "dashboard/context/state"
+            dashboard_message = MQTTMessage.serialize(dashboard_state_event)
+            self.mqtt_client.publish(dashboard_topic, dashboard_message, qos=1)
+            
+            logger.debug(f"[{self.service_id}] Published dashboard state update with {len(dashboard_state_event.payload['agents'])} agents")
+            
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error publishing dashboard state: {e}", exc_info=True)
 
     def _handle_action_report(self, event):
         """Handle actionReport event from VirtualAgent (SYNCHRONOUS - Response)."""
@@ -507,4 +672,102 @@ class ContextRuleManager:
             self.mqtt_client.loop_stop()
             self.mqtt_client.disconnect()
             logger.info(f"[{self.service_id}] MQTT client disconnected.")
-        logger.info(f"[{self.service_id}] Context rule manager stopped.") 
+        logger.info(f"[{self.service_id}] Context rule manager stopped.")
+
+    def send_manual_command(self, agent_id: str, action_name: str, 
+                           parameters: Optional[Dict[str, Any]] = None,
+                           priority: str = "High") -> Dict[str, Any]:
+        """
+        Send a manual control command from dashboard/API to a virtual agent.
+        
+        Args:
+            agent_id: Target virtual agent ID
+            action_name: Action to perform (e.g., "turn_on", "set_temperature")
+            parameters: Optional action parameters
+            priority: Command priority (Low|Normal|High|Critical)
+            
+        Returns:
+            Dict with command_id, success status, and message
+        """
+        try:
+            # Check if agent exists in our known agents
+            if agent_id not in self.known_agents:
+                logger.warning(f"[{self.service_id}] Manual command attempted for unknown agent: {agent_id}")
+                return {
+                    "success": False,
+                    "command_id": None,
+                    "message": f"Agent {agent_id} not found or not connected",
+                    "agent_id": agent_id
+                }
+            
+            # Create and send action command with specified priority
+            action_event = EventFactory.create_action_event(
+                virtual_agent_id=agent_id,
+                action_name=action_name,
+                parameters=parameters,
+                priority=priority  # Manual commands typically get higher priority
+            )
+            
+            # Send via MQTT to the specific agent
+            action_topic = TopicManager.context_to_virtual_action(agent_id)
+            action_message = MQTTMessage.serialize(action_event)
+            publish_result = self.mqtt_client.publish(action_topic, action_message, qos=1)
+            
+            # Log the manual command for audit trail
+            logger.info(f"[{self.service_id}] MANUAL COMMAND sent to {agent_id}: {action_name}")
+            if parameters:
+                logger.info(f"[{self.service_id}] Command parameters: {parameters}")
+            logger.info(f"[{self.service_id}] Command ID: {action_event.event.id}, Priority: {priority}")
+            
+            return {
+                "success": True,
+                "command_id": action_event.event.id,
+                "message": f"Manual command '{action_name}' sent to {agent_id}",
+                "action_name": action_name,
+                "agent_id": agent_id,
+                "priority": priority,
+                "publish_result": str(publish_result)
+            }
+            
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error sending manual command to {agent_id}: {e}", exc_info=True)
+            return {
+                "success": False,
+                "command_id": None,
+                "message": f"Error sending command: {str(e)}",
+                "agent_id": agent_id
+            }
+
+    def get_known_agents(self) -> list:
+        """
+        Get list of known/connected agents for dashboard display.
+        
+        Returns:
+            List of agent IDs that have sent context updates
+        """
+        return list(self.known_agents)
+
+    def get_agent_info(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get complete information about a specific agent including metadata.
+        
+        Args:
+            agent_id: The agent ID to get information for
+            
+        Returns:
+            Dict with agent state, type, sensors, timestamps, etc.
+            None if agent not found
+        """
+        with self.context_lock:
+            agent_data = self.context_map.get(agent_id)
+            if agent_data:
+                return {
+                    "agent_id": agent_id,
+                    "state": agent_data["state"],
+                    "agent_type": agent_data["agent_type"],
+                    "sensors": agent_data["sensors"],
+                    "timestamp": agent_data["timestamp"],
+                    "last_update": agent_data["last_update"],
+                    "is_responsive": (time.time() - agent_data["last_update"]) < 300  # 5 minute timeout
+                }
+            return None 
