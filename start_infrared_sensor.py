@@ -3,6 +3,7 @@ import logging
 import time
 import sys
 import os
+import argparse
 
 # Add the project root to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -11,6 +12,11 @@ from lapras_agents.infrared_sensor_agent import InfraredSensorAgent
 
 def main():
     # Set up logging
+    parser = argparse.ArgumentParser(description='Start the infrared sensor agent')
+    parser.add_argument('--channel', type=int, default=1, help='Channel number for the infrared sensor')
+    parser.add_argument('--sensor_id', type=str, default="infrared_1", help='Sensor ID for the infrared sensor')
+    args = parser.parse_args()
+    
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - [%(module)s] - %(message)s'
@@ -20,8 +26,9 @@ def main():
     try:
         # Initialize infrared sensor agent
         agent = InfraredSensorAgent(
-            sensor_id="infrared_1",
-            virtual_agent_id="aircon"
+            sensor_id=args.sensor_id,
+            virtual_agent_id="aircon",
+            channel=args.channel
         )
         logger.info("[INFRARED_SENSOR] Infrared sensor agent initialized and started")
         

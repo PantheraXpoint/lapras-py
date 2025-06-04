@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class InfraredSensorAgent(SensorAgent):
     """Infrared distance sensor agent using Phidget sensor."""
     
-    def __init__(self, sensor_id: str = "infrared_1", virtual_agent_id: str = "aircon", 
+    def __init__(self, sensor_id: str = "infrared_1", virtual_agent_id: str = "aircon", channel: int = 1,
                  mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
         # Phidget sensor
         self.ir_sensor: Optional[VoltageRatioInput] = None
@@ -33,8 +33,8 @@ class InfraredSensorAgent(SensorAgent):
         self.PROXIMITY_THRESHOLD_CM = 100.0
         
         # Device parameters
-        self.DEVICE_SERIAL_NUMBER = 455252
-        self.TARGET_CHANNEL = 2
+        self.DEVICE_SERIAL_NUMBER = 455869  #run this command to see the serial number "phidget22admin -d"
+        self.TARGET_CHANNEL = channel
         self.OPEN_TIMEOUT_MS = 5000
         
         # Rate limiting

@@ -8,7 +8,7 @@ from Phidget22.Unit import Unit
 
 # --- Configuration ---
 # YOU HAVE IDENTIFIED THE IR SENSOR (Phidget 1101 Adapter) IS ON CHANNEL 2
-IR_SENSOR_CHANNEL = 2
+IR_SENSOR_CHANNEL = 3
 
 # We will read the raw voltage ratio as the specific Sharp sensor model
 # connected to your 1101 adapter is not specified to this script.
@@ -22,7 +22,8 @@ IR_SENSOR_TYPE_TO_SET = VoltageRatioSensorType.SENSOR_TYPE_VOLTAGERATIO
 # Set to your InterfaceKit's serial number if known and needed.
 # You can find this from previous script runs or on the device itself.
 # Example: SERIAL_NUMBER = 455869
-SERIAL_NUMBER = 455252 # Use -1 if it's the only Phidget or to auto-detect
+SERIAL_NUMBER = 455869 # Use -1 if it's the only Phidget or to auto-detect
+# SERIAL_NUMBER = 455252 run this command to see the serial number "phidget22admin -d"
 
 DATA_INTERVAL_MS = 200 # How often to try to get a new value (in milliseconds)
 # --- End Configuration ---
