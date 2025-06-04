@@ -6,6 +6,7 @@ import urllib.request
 import json
 import colorsys
 import sys
+from collections import defaultdict
 
 # Add the project root to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,17 +17,23 @@ from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager, Sen
 logger = logging.getLogger(__name__)
 
 class LightHueAgent(VirtualAgent):
-    def __init__(self, agent_id: str = "none", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+    def __init__(self, agent_id: str = "none", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, decision_window: int = 2):
         super().__init__(agent_id, "hue_light", mqtt_broker, mqtt_port)
         
         logger.info(f"[{self.agent_id}] LightHueAgent initialized")
 
-        with self.state_lock:
-            self.local_state.update({
-                "power": "on",
-                "proximity_status": "unknown",
-            })
+        # with self.state_lock:
+        self.local_state.update({
+            "power": "on",
+            "proximity_status": "unknown",
+            "sensor_states": {},  # Store sensor states with timestamps
+            "last_decision_time": 0.0
+        })
         
+        # Add time window tracking for proximity states
+        self.proximity_window = decision_window
+        
+        # self.add_sensor_agent("infrared_1", "infrared_2", "infrared_3")
         self.add_sensor_agent("infrared_1")
         
         logger.info(f"[{self.agent_id}] LightHueAgent initialization completed")
@@ -36,36 +43,75 @@ class LightHueAgent(VirtualAgent):
         if sensor_payload.sensor_type == "infrared":
             # NOTE(YH): this is a hack to avoid race condition
             with self.state_lock:
+                # Update sensor data
                 self.sensor_data[sensor_id] = {
-                "sensor_type": sensor_payload.sensor_type,
-                "value": sensor_payload.value,
-                "unit": sensor_payload.unit,
-                "metadata": sensor_payload.metadata,
-            }
+                    "sensor_type": sensor_payload.sensor_type,
+                    "value": sensor_payload.value,
+                    "unit": sensor_payload.unit,
+                    "metadata": sensor_payload.metadata,
+                }
 
-            assert (sensor_payload.metadata is not None), f"[{self.agent_id}] Sensor metadata is None for infrared sensor {sensor_id}"
-            # Update proximity status based on infrared sensor
-            if (sensor_payload.metadata is not None) and ("proximity_status" in sensor_payload.metadata):
-                logger.info(f"[{self.agent_id}] Processing infrared sensor update: {sensor_payload.value}{sensor_payload.unit}, metadata={sensor_payload.metadata}")
-                old_proximity = None
-                old_distance = None
-                with self.state_lock:
-                    old_proximity = self.local_state.get("proximity_status")
-                    old_distance = self.local_state.get("distance")
-                    self.local_state["proximity_status"] = sensor_payload.metadata["proximity_status"]
-                    self.local_state["distance"] = sensor_payload.value
-                logger.info(f"[{self.agent_id}] Updated local state: proximity_status={self.local_state['proximity_status']}, distance={self.local_state['distance']}")
+                assert (sensor_payload.metadata is not None), f"[{self.agent_id}] Sensor metadata is None for infrared sensor {sensor_id}"
                 
-                # Only log and trigger publication if something actually changed
-                # TODO(YH): only used for debugging
-                # old_distance = 0
-                if (old_proximity != sensor_payload.metadata["proximity_status"] or 
-                    old_distance != sensor_payload.value):
+                # Update proximity status based on infrared sensor
+                if (sensor_payload.metadata is not None) and ("proximity_status" in sensor_payload.metadata):
+                    logger.info(f"[{self.agent_id}] Processing infrared sensor update: {sensor_payload.value}{sensor_payload.unit}, metadata={sensor_payload.metadata}")
+                    
+                    # Update the sensor's state in local_state
+                    if "sensor_states" not in self.local_state:
+                        self.local_state["sensor_states"] = {}
+                    
+                    self.local_state["sensor_states"][sensor_id] = {
+                        "status": sensor_payload.metadata["proximity_status"],
+                        "timestamp": time.time(),
+                        "distance": sensor_payload.value
+                    }
+                    
+                    # Check if it's time to make a decision (every 2 seconds)
+                    current_time = time.time()
+                    if current_time - self.local_state["last_decision_time"] >= self.proximity_window:
+                        # Make decision based on collected data
+                        any_near = False
+                        all_far = True
+                        
+                        for sid, state in self.local_state["sensor_states"].items():
+                            # Only consider states within the time window
+                            if current_time - state["timestamp"] <= self.proximity_window:
+                                if state["status"] == "near":
+                                    any_near = True
+                                    all_far = False
+                                elif state["status"] == "far":
+                                    # If any sensor is far, we can't say all are far yet
+                                    pass
+                                else:
+                                    # Unknown state, can't make a determination
+                                    all_far = False
+                            else:
+                                # State is outside time window, treat as far
+                                pass
+                        
+                        # Make decision and update state
+                        if any_near:
+                            new_proximity = "near"
+                            logger.info(f"[{self.agent_id}] Decision: Turning ON light (any sensor near in last {self.proximity_window}s)")
+                        elif all_far:
+                            new_proximity = "far"
+                            logger.info(f"[{self.agent_id}] Decision: Turning OFF light (all sensors far in last {self.proximity_window}s)")
+                        else:
+                            new_proximity = self.local_state.get("proximity_status", "unknown")
+                            logger.info(f"[{self.agent_id}] Decision: No change (inconclusive sensor states)")
+                        
+                        # Update state and trigger publication if changed
+                        if new_proximity != self.local_state.get("proximity_status"):
+                            self.local_state["proximity_status"] = new_proximity
+                            logger.info(f"[{self.agent_id}] Updated proximity status to: {new_proximity}")
+                            self._trigger_state_publication()
+                        
+                        # Update last decision time
+                        self.local_state["last_decision_time"] = current_time
+                    
+                    # Log the sensor update
                     logger.info(f"[{self.agent_id}] Updated from IR sensor: distance={sensor_payload.value}{sensor_payload.unit}, proximity={sensor_payload.metadata['proximity_status']}")
-                    # Trigger state publication since local_state changed
-                    self._trigger_state_publication()
-                else:
-                    logger.debug(f"[{self.agent_id}] IR sensor data unchanged: distance={sensor_payload.value}{sensor_payload.unit}, proximity={sensor_payload.metadata['proximity_status']}")
 
     def perception(self):
         """Internal perception logic - runs continuously."""
