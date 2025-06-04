@@ -43,7 +43,7 @@ class EventMetadata:
         if not self.id:
             self.id = str(uuid.uuid4())[:8]
         if not self.timestamp:
-            self.timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self.timestamp = time.gmtime()
 
 @dataclass
 class EntityInfo:
