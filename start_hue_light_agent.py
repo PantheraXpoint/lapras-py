@@ -19,7 +19,7 @@ def main():
     
     try:
         # Initialize aircon virtual agent
-        agent = LightHueAgent(agent_id="hue_light")
+        agent = LightHueAgent(agent_id="hue_light", decision_window=2)
         logger.info("[AIRCON_VIRTUAL] Aircon virtual agent initialized and started")
         
         # Keep the main thread alive

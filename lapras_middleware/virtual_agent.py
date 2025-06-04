@@ -58,7 +58,7 @@ class VirtualAgent(Agent, ABC):
             
             # Subscribe to sensor broadcast topics from all managed sensors (ASYNCHRONOUS - one-to-many)
             for sensor_id in self.sensor_agents:
-                sensor_topic = TopicManager.sensor_broadcast(sensor_id)
+                sensor_topic = TopicManager.sensor_broadcast(sensor_id) # sensor_id, "infrared_1", ...
                 result = client.subscribe(sensor_topic, qos=1)
                 logger.info(f"[{self.agent_id}] Subscribed to sensor broadcast topic: {sensor_topic} (result: {result})")
         else:
@@ -370,30 +370,30 @@ class VirtualAgent(Agent, ABC):
             complete_state = None
             sensor_data_copy = None
             
-            with self.state_lock:
-                # Only check if LOCAL state changed, not sensor data
-                if self.last_published_state != self.local_state:
-                    # Local state changed, prepare data for publishing
-                    complete_state = self.local_state.copy()
-                    
-                    # Add sensor data to state
-                    for sensor_id, sensor_info in self.sensor_data.items():
-                        complete_state[f"{sensor_id}_value"] = sensor_info["value"]
-                        complete_state[f"{sensor_id}_unit"] = sensor_info["unit"]
-                        if sensor_info["metadata"]:
-                            for key, value in sensor_info["metadata"].items():
-                                complete_state[f"{sensor_id}_{key}"] = value
-                    
-                    sensor_data_copy = self.sensor_data.copy()
-                    
-                    # Update last published state
-                    self.last_published_state = self.local_state.copy()
-                    
-                    logger.info(f"[{self.agent_id}] Published updateContext event due to LOCAL state change")
-                    logger.debug(f"[{self.agent_id}] New local state: {self.local_state}")
-                else:
-                    logger.debug(f"[{self.agent_id}] Local state unchanged, skipping publish")
-            
+            # with self.state_lock:
+            # Only check if LOCAL state changed, not sensor data
+            if self.last_published_state != self.local_state:
+                # Local state changed, prepare data for publishing
+                complete_state = self.local_state.copy()
+                
+                # Add sensor data to state
+                for sensor_id, sensor_info in self.sensor_data.items():
+                    complete_state[f"{sensor_id}_value"] = sensor_info["value"]
+                    complete_state[f"{sensor_id}_unit"] = sensor_info["unit"]
+                    if sensor_info["metadata"]:
+                        for key, value in sensor_info["metadata"].items():
+                            complete_state[f"{sensor_id}_{key}"] = value
+                
+                sensor_data_copy = self.sensor_data.copy()
+                
+                # Update last published state
+                self.last_published_state = self.local_state.copy()
+                
+                logger.info(f"[{self.agent_id}] Published updateContext event due to LOCAL state change")
+                logger.debug(f"[{self.agent_id}] New local state: {self.local_state}")
+            else:
+                logger.debug(f"[{self.agent_id}] Local state unchanged, skipping publish")
+        
             # Publish outside of the lock if state changed
             if complete_state is not None:
                 self._publish_context_update_with_data(complete_state, sensor_data_copy)
