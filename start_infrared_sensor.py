@@ -12,9 +12,13 @@ from lapras_agents.infrared_sensor_agent import InfraredSensorAgent
 
 def main():
     # Set up logging
-    parser = argparse.ArgumentParser(description='Start the infrared sensor agent')
-    parser.add_argument('--channel', type=int, default=1, help='Channel number for the infrared sensor')
-    parser.add_argument('--sensor_id', type=str, default="infrared_1", help='Sensor ID for the infrared sensor')
+    parser = argparse.ArgumentParser(description='Start the infrared sensor agent for 3 consecutive channels')
+    parser.add_argument('--channel', type=int, default=1, 
+                       help='Starting channel number (will use this channel + 1 and + 2 for 3 sensors total)')
+    parser.add_argument('--sensor_id', type=str, default="infrared", 
+                       help='Sensor ID for the multi-channel infrared sensor')
+    parser.add_argument('--virtual_agent_id', type=str, default="any", 
+                       help='Virtual agent association (optional - sensor broadcasts to all agents anyway)')
     args = parser.parse_args()
     
     logging.basicConfig(
@@ -23,25 +27,58 @@ def main():
     )
     logger = logging.getLogger(__name__)
     
+    # Calculate the 3 channels that will be used
+    channels = [args.channel, args.channel + 1, args.channel + 2]
+    logger.info(f"[INFRARED_SENSOR] Starting infrared sensor agent for channels: {channels}")
+    logger.info(f"[INFRARED_SENSOR] Note: Sensor will broadcast to ALL virtual agents, regardless of virtual_agent_id setting")
+    agent = None
     try:
         # Initialize infrared sensor agent
         agent = InfraredSensorAgent(
             sensor_id=args.sensor_id,
-            virtual_agent_id="aircon",
+            virtual_agent_id=args.virtual_agent_id,
             channel=args.channel
         )
-        logger.info("[INFRARED_SENSOR] Infrared sensor agent initialized and started")
+        logger.info(f"[INFRARED_SENSOR] Infrared sensor agent initialized for channels {channels}")
+        
+        # Log sensor readings periodically for debugging
+        last_log_time = 0
         
         # Keep the main thread alive
         while True:
             time.sleep(1)
             
+            # Log sensor readings every 5 seconds for debugging
+            current_time = time.time()
+            if current_time - last_log_time > 5:
+                try:
+                    # Test read all sensors to show current values
+                    value, unit, metadata = agent.read_sensor()
+                    if metadata and "readings" in metadata:
+                        readings_summary = []
+                        for channel_key, reading_data in metadata["readings"].items():
+                            channel_num = channel_key.replace("channel_", "")
+                            proximity = reading_data["metadata"].get("proximity_status", "unknown")
+                            distance = reading_data["value"]
+                            readings_summary.append(f"Ch{channel_num}: {distance}cm ({proximity})")
+                        
+                        logger.info(f"[INFRARED_SENSOR] Current readings - {' | '.join(readings_summary)}")
+                    else:
+                        logger.warning(f"[INFRARED_SENSOR] No sensor readings available")
+                except Exception as e:
+                    logger.error(f"[INFRARED_SENSOR] Error reading sensors for logging: {e}")
+                
+                last_log_time = current_time
+            
     except KeyboardInterrupt:
         logger.info("[INFRARED_SENSOR] Received keyboard interrupt")
     except Exception as e:
         logger.error(f"[INFRARED_SENSOR] Error in infrared sensor agent: {e}")
+        import traceback
+        logger.error(f"[INFRARED_SENSOR] Traceback: {traceback.format_exc()}")
     finally:
         if 'agent' in locals():
+            logger.info("[INFRARED_SENSOR] Stopping agent...")
             agent.stop()
         logger.info("[INFRARED_SENSOR] Infrared sensor agent stopped")
 
