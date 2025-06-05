@@ -224,7 +224,7 @@ class ContextRuleManager:
                     "timestamp": event.event.timestamp,
                     "last_update": time.time()
                 }
-                logger.info(f"[{self.service_id}] Updated context for agent {agent_id}")
+                logger.info(f"[{self.service_id}] Updated context for agent {agent_id}, context payload {context_payload.state}")
                 logger.debug(f"[{self.service_id}] Current context map: {json.dumps(self.context_map, indent=2)}")
             
             # Track this agent for future action commands

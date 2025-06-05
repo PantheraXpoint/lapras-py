@@ -33,14 +33,33 @@ class LightHueAgent(VirtualAgent):
         # Add time window tracking for proximity states
         self.proximity_window = decision_window
         
+        # Track last processing time for each sensor
+        self.last_sensor_processing = {}
+
+        self.sensor_data = defaultdict(dict)  # Store sensor data with sensor_id as key
+        
         # self.add_sensor_agent("infrared_1", "infrared_2", "infrared_3")
         self.add_sensor_agent("infrared_1")
+        self.add_sensor_agent("infrared_2")
+        self.add_sensor_agent("infrared_3")
         
         logger.info(f"[{self.agent_id}] LightHueAgent initialization completed")
     
     def _process_sensor_update(self, sensor_payload: SensorPayload, sensor_id: str):
         """Process sensor data updates from managed sensors."""
         if sensor_payload.sensor_type == "infrared":
+            current_time = time.time()
+            logger.info(f"process sensor update: {sensor_id}, {sensor_payload.value}")
+            
+            # Check if we should process this message based on the decision window
+            last_processed = self.last_sensor_processing.get(sensor_id, 0)
+            if current_time - last_processed < self.proximity_window:
+                logger.info(f"[{self.agent_id}] Skipping message from {sensor_id} - too soon after last processing")
+                return
+                
+            # Update last processed time for this sensor
+            self.last_sensor_processing[sensor_id] = current_time
+            
             # NOTE(YH): this is a hack to avoid race condition
             with self.state_lock:
                 # Update sensor data
@@ -55,48 +74,47 @@ class LightHueAgent(VirtualAgent):
                 
                 # Update proximity status based on infrared sensor
                 if (sensor_payload.metadata is not None) and ("proximity_status" in sensor_payload.metadata):
-                    logger.info(f"[{self.agent_id}] Processing infrared sensor update: {sensor_payload.value}{sensor_payload.unit}, metadata={sensor_payload.metadata}")
-                    
                     # Update the sensor's state in local_state
                     if "sensor_states" not in self.local_state:
                         self.local_state["sensor_states"] = {}
                     
                     self.local_state["sensor_states"][sensor_id] = {
                         "status": sensor_payload.metadata["proximity_status"],
-                        "timestamp": time.time(),
+                        "timestamp": current_time,
                         "distance": sensor_payload.value
                     }
+
+                    logger.info(f"sensor states: {self.local_state.get('sensor_states', {})}, local state: {self.local_state}")
                     
                     # Check if it's time to make a decision (every 2 seconds)
-                    current_time = time.time()
                     if current_time - self.local_state["last_decision_time"] >= self.proximity_window:
                         # Make decision based on collected data
                         any_near = False
                         all_far = True
+                        active_sensors = 0
                         
                         for sid, state in self.local_state["sensor_states"].items():
                             # Only consider states within the time window
-                            if current_time - state["timestamp"] <= self.proximity_window:
-                                if state["status"] == "near":
-                                    any_near = True
-                                    all_far = False
-                                elif state["status"] == "far":
-                                    # If any sensor is far, we can't say all are far yet
-                                    pass
-                                else:
-                                    # Unknown state, can't make a determination
-                                    all_far = False
-                            else:
-                                # State is outside time window, treat as far
+                            # if current_time - state["timestamp"] <= self.proximity_window:
+                            active_sensors += 1
+                            if state["status"] == "near":
+                                any_near = True
+                                # Don't break here - we need to check all sensors
+                            elif state["status"] == "far":
+                                # If any sensor is far, we can't say all are far yet
                                 pass
+                            else:
+                                # Unknown state, can't make a determination
+                                all_far = False
+                                # Don't break here - we need to check all sensors
                         
                         # Make decision and update state
                         if any_near:
                             new_proximity = "near"
                             logger.info(f"[{self.agent_id}] Decision: Turning ON light (any sensor near in last {self.proximity_window}s)")
-                        elif all_far:
+                        elif all_far and active_sensors > 0:  # Only set to far if we have at least one active sensor
                             new_proximity = "far"
-                            logger.info(f"[{self.agent_id}] Decision: Turning OFF light (all sensors far in last {self.proximity_window}s)")
+                            logger.info(f"[{self.agent_id}] Decision: Turning OFF light (all {active_sensors} sensors far in last {self.proximity_window}s)")
                         else:
                             new_proximity = self.local_state.get("proximity_status", "unknown")
                             logger.info(f"[{self.agent_id}] Decision: No change (inconclusive sensor states)")
@@ -111,7 +129,7 @@ class LightHueAgent(VirtualAgent):
                         self.local_state["last_decision_time"] = current_time
                     
                     # Log the sensor update
-                    logger.info(f"[{self.agent_id}] Updated from IR sensor: distance={sensor_payload.value}{sensor_payload.unit}, proximity={sensor_payload.metadata['proximity_status']}")
+                    # logger.info(f"[{self.agent_id}] Updated from IR sensor: distance={sensor_payload.value}{sensor_payload.unit}, proximity={sensor_payload.metadata['proximity_status']}")
 
     def perception(self):
         """Internal perception logic - runs continuously."""
@@ -134,7 +152,7 @@ class LightHueAgent(VirtualAgent):
         complete_state = None
         sensor_data_copy = None
         
-        logger.info(f"[{self.agent_id}] DEBUG: About to acquire state_lock")
+        # logger.info(f"[{self.agent_id}] DEBUG: About to acquire state_lock")
         with self.state_lock:
             # logger.info(f"[{self.agent_id}] DEBUG: state_lock acquired")
             old_sensor_data = self.sensor_data.get(sensor_id, {})
@@ -168,25 +186,26 @@ class LightHueAgent(VirtualAgent):
                         complete_state[f"{sensor_id_inner}_{key}"] = value
             sensor_data_copy = self.sensor_data.copy()
         
-        logger.info(f"[{self.agent_id}] DEBUG: state_lock released")
+        # logger.info(f"[{self.agent_id}] DEBUG: state_lock released")
         
         # Always trigger perception update for subclass processing
-        logger.info(f"[{self.agent_id}] DEBUG: About to call _process_sensor_update")
+        # logger.info(f"[{self.agent_id}] DEBUG: About to call _process_sensor_update")
         self._process_sensor_update(sensor_payload, sensor_id)
-        logger.info(f"[{self.agent_id}] DEBUG: _process_sensor_update completed")
+        # logger.info(f"[{self.agent_id}] DEBUG: _process_sensor_update completed")
         
         # Always publish updateContext for sensor data (frequent updates are good for monitoring)
-        logger.info(f"[{self.agent_id}] DEBUG: About to call _publish_context_update")
+        # logger.info(f"[{self.agent_id}] DEBUG: About to call _publish_context_update")
         self._publish_context_update_with_data(complete_state, sensor_data_copy)
-        logger.info(f"[{self.agent_id}] DEBUG: _publish_context_update returned")
+        # logger.info(f"[{self.agent_id}] DEBUG: _publish_context_update returned")
         
         # Log differently based on whether proximity changed
         if proximity_changed:
             logger.info(f"[{self.agent_id}] Published context update - PROXIMITY CHANGED: {sensor_payload.value}{sensor_payload.unit}")
         else:
-            logger.info(f"[{self.agent_id}] Published context update - sensor reading: {sensor_payload.value}{sensor_payload.unit}")
+            # logger.info(f"[{self.agent_id}] Published context update - sensor reading: {sensor_payload.value}{sensor_payload.unit}")
+            pass
         
-        logger.info(f"[{self.agent_id}] DEBUG: _update_sensor_data completed for sensor {sensor_id}")
+        # logger.info(f"[{self.agent_id}] DEBUG: _update_sensor_data completed for sensor {sensor_id}")
 
 
     def __turn_on_light(self):

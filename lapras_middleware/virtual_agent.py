@@ -69,12 +69,12 @@ class VirtualAgent(Agent, ABC):
         try:
             topic = msg.topic
             message = msg.payload.decode('utf-8')
-            logger.info(f"[{self.agent_id}] DEBUG: Received MQTT message on topic: {topic}, size: {len(message)} bytes")
+            # logger.info(f"[{self.agent_id}] DEBUG: Received MQTT message on topic: {topic}, size: {len(message)} bytes")
             
             # Check if it's an action command (SYNCHRONOUS - Request)
             action_topic = TopicManager.context_to_virtual_action(self.agent_id)
             if topic == action_topic:
-                logger.info(f"[{self.agent_id}] DEBUG: Processing action command message")
+                # logger.info(f"[{self.agent_id}] DEBUG: Processing action command message")
                 try:
                     event = MQTTMessage.deserialize(message)
                     if event.event.type == "applyAction":
@@ -92,17 +92,17 @@ class VirtualAgent(Agent, ABC):
             for sensor_id in self.sensor_agents:
                 sensor_topic = TopicManager.sensor_broadcast(sensor_id)
                 if topic == sensor_topic:
-                    logger.info(f"[{self.agent_id}] DEBUG: Processing sensor data message from {sensor_id}")
+                    # logger.info(f"[{self.agent_id}] DEBUG: Processing sensor data message from {sensor_id}")
                     try:
                         event = MQTTMessage.deserialize(message)
                         if event.event.type == "readSensor":
                             sensor_payload = MQTTMessage.get_payload_as(event, SensorPayload)
-                            logger.info(f"[{self.agent_id}] Received sensor data from {sensor_id}: {sensor_payload.value}")
+                            # logger.info(f"[{self.agent_id}] Received sensor data from {sensor_id}: {sensor_payload.value}")
                             
                             # Call update in a try-catch to see if this is where the problem occurs
-                            logger.info(f"[{self.agent_id}] DEBUG: About to call _update_sensor_data")
+                            # logger.info(f"[{self.agent_id}] DEBUG: About to call _update_sensor_data")
                             self._update_sensor_data(event, sensor_payload)
-                            logger.info(f"[{self.agent_id}] DEBUG: Successfully completed _update_sensor_data")
+                            # logger.info(f"[{self.agent_id}] DEBUG: Successfully completed _update_sensor_data")
                             
                             sensor_message_handled = True
                         else:
@@ -114,11 +114,11 @@ class VirtualAgent(Agent, ABC):
                     return
             
             if not sensor_message_handled:
-                logger.info(f"[{self.agent_id}] DEBUG: Message not handled, calling parent _on_message")
+                # logger.info(f"[{self.agent_id}] DEBUG: Message not handled, calling parent _on_message")
                 # If not handled above, call parent's _on_message
                 super()._on_message(client, userdata, msg)
             
-            logger.info(f"[{self.agent_id}] DEBUG: Finished processing message on topic: {topic}")
+            # logger.info(f"[{self.agent_id}] DEBUG: Finished processing message on topic: {topic}")
             
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error handling MQTT message: {e}")
@@ -136,9 +136,9 @@ class VirtualAgent(Agent, ABC):
         complete_state = None
         sensor_data_copy = None
         
-        logger.info(f"[{self.agent_id}] DEBUG: About to acquire state_lock")
+        # logger.info(f"[{self.agent_id}] DEBUG: About to acquire state_lock")
         with self.state_lock:
-            logger.info(f"[{self.agent_id}] DEBUG: state_lock acquired")
+            # logger.info(f"[{self.agent_id}] DEBUG: state_lock acquired")
             old_sensor_data = self.sensor_data.get(sensor_id, {})
             
             # Store new sensor data
@@ -280,7 +280,8 @@ class VirtualAgent(Agent, ABC):
         while self.running:
             try:
                 # Get publish request from queue (with timeout to allow clean shutdown)
-                publish_request = self.publish_queue.get(timeout=1.0)
+                # publish_request = self.publish_queue.get(timeout=1.0)
+                publish_request = self.publish_queue.get()
                 
                 topic = publish_request['topic']
                 message = publish_request['message']
@@ -289,7 +290,7 @@ class VirtualAgent(Agent, ABC):
                 # Perform the actual publish on this separate thread
                 # logger.info(f"[{self.agent_id}] Publishing queued message to topic: {topic}, {message}")
                 publish_result = self.mqtt_client.publish(topic, message, qos=qos)
-                logger.info(f"[{self.agent_id}] Queued publish result: {publish_result}")
+                # logger.info(f"[{self.agent_id}] Queued publish result: {publish_result}")
                 
                 self.publish_queue.task_done()
                 
@@ -302,9 +303,9 @@ class VirtualAgent(Agent, ABC):
     def _publish_context_update_with_data(self, complete_state: Dict[str, Any], sensor_data_copy: Dict[str, Dict[str, Any]]):
         """Publish updateContext event with provided state data (no locking needed)."""
         try:
-            logger.info(f"[{self.agent_id}] DEBUG: _publish_context_update_with_data called")
-            logger.info(f"[{self.agent_id}] DEBUG: complete_state = {complete_state}")
-            logger.info(f"[{self.agent_id}] DEBUG: sensor_data_copy = {sensor_data_copy}")
+            # logger.info(f"[{self.agent_id}] DEBUG: _publish_context_update_with_data called")
+            # logger.info(f"[{self.agent_id}] DEBUG: complete_state = {complete_state}")
+            # logger.info(f"[{self.agent_id}] DEBUG: sensor_data_copy = {sensor_data_copy}")
             
             # Create updateContext event (ASYNCHRONOUS)
             context_event = EventFactory.create_context_event(
@@ -317,7 +318,7 @@ class VirtualAgent(Agent, ABC):
             context_topic = TopicManager.virtual_to_context(self.agent_id)
             context_message = MQTTMessage.serialize(context_event)
             
-            logger.info(f"[{self.agent_id}] DEBUG: Queuing context update for topic: {context_topic}")
+            logger.info(f"[{self.agent_id}] DEBUG: Queuing context update for topic: {context_topic}, state {complete_state['power']}, {complete_state['proximity_status']}")
             
             # Queue the publish operation instead of doing it directly to avoid MQTT deadlock
             publish_request = {
@@ -327,8 +328,8 @@ class VirtualAgent(Agent, ABC):
             }
             self.publish_queue.put(publish_request)
             
-            logger.info(f"[{self.agent_id}] Queued updateContext event for publishing")
-            logger.info(f"[{self.agent_id}] DEBUG: _publish_context_update_with_data completed successfully")
+            # logger.info(f"[{self.agent_id}] Queued updateContext event for publishing")
+            # logger.info(f"[{self.agent_id}] DEBUG: _publish_context_update_with_data completed successfully")
                 
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error publishing context update: {e}")
@@ -338,12 +339,12 @@ class VirtualAgent(Agent, ABC):
     def _publish_context_update(self):
         """Publish updateContext event with current complete state (legacy method - acquires lock)."""
         try:
-            logger.info(f"[{self.agent_id}] DEBUG: _publish_context_update called")
+            # logger.info(f"[{self.agent_id}] DEBUG: _publish_context_update called")
             with self.state_lock:
                 # Combine local_state with sensor data for complete context
                 complete_state = self.local_state.copy()
-                logger.info(f"[{self.agent_id}] DEBUG: local_state = {self.local_state}")
-                logger.info(f"[{self.agent_id}] DEBUG: sensor_data = {self.sensor_data}")
+                # logger.info(f"[{self.agent_id}] DEBUG: local_state = {self.local_state}")
+                # logger.info(f"[{self.agent_id}] DEBUG: sensor_data = {self.sensor_data}")
                 
                 # Add sensor data to state
                 for sensor_id, sensor_info in self.sensor_data.items():
@@ -353,7 +354,7 @@ class VirtualAgent(Agent, ABC):
                         for key, value in sensor_info["metadata"].items():
                             complete_state[f"{sensor_id}_{key}"] = value
                 
-                logger.info(f"[{self.agent_id}] DEBUG: complete_state = {complete_state}")
+                # logger.info(f"[{self.agent_id}] DEBUG: complete_state = {complete_state}")
                 sensor_data_copy = self.sensor_data.copy()
             
             # Call the lock-free version
@@ -389,7 +390,7 @@ class VirtualAgent(Agent, ABC):
                 # Update last published state
                 self.last_published_state = self.local_state.copy()
                 
-                logger.info(f"[{self.agent_id}] Published updateContext event due to LOCAL state change")
+                # logger.info(f"[{self.agent_id}] Published updateContext event due to LOCAL state change")
                 logger.debug(f"[{self.agent_id}] New local state: {self.local_state}")
             else:
                 logger.debug(f"[{self.agent_id}] Local state unchanged, skipping publish")

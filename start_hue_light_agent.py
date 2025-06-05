@@ -20,20 +20,20 @@ def main():
     try:
         # Initialize aircon virtual agent
         agent = LightHueAgent(agent_id="hue_light", decision_window=2)
-        logger.info("[AIRCON_VIRTUAL] Aircon virtual agent initialized and started")
+        logger.info("[HUE] HUE virtual agent initialized and started")
         
         # Keep the main thread alive
         while True:
             time.sleep(1)
             
     except KeyboardInterrupt:
-        logger.info("[AIRCON_VIRTUAL] Received keyboard interrupt")
+        logger.info("[HUE] Received keyboard interrupt")
     except Exception as e:
-        logger.error(f"[AIRCON_VIRTUAL] Error in aircon virtual agent: {e}")
+        logger.error(f"[HUE] Error in HUE virtual agent: {e}")
     finally:
         if 'agent' in locals():
             agent.stop()
-        logger.info("[AIRCON_VIRTUAL] Aircon virtual agent stopped")
+        logger.info("[HUE] HUE virtual agent stopped")
 
 if __name__ == "__main__":
     main()
