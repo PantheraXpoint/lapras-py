@@ -23,10 +23,10 @@ SensorAgent → (MQTT) → VirtualAgent → (MQTT) → ContextRuleManager
 
 ### MQTT Topics
 
-- **Sensor to Virtual**: `sensor/{sensor_id}/to/{virtual_agent_id}/data`
-- **Virtual to Context**: `virtual/{virtual_agent_id}/state`
-- **Context to Virtual**: `virtual/{virtual_agent_id}/action`
-- **Virtual to Context (results)**: `virtual/{virtual_agent_id}/result`
+- **Sensor Broadcast**: `sensor/{sensor_id}/readSensor` (sensors broadcast to all interested virtual agents)
+- **Virtual to Context**: `virtual/{virtual_agent_id}/to/context/updateContext`
+- **Context to Virtual**: `context/to/{virtual_agent_id}/applyAction`
+- **Virtual to Context (results)**: `virtual/{virtual_agent_id}/to/context/actionReport`
 
 ## Message Structure
 
