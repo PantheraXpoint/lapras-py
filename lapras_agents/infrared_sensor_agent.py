@@ -1,6 +1,7 @@
 import logging
 import time
 from typing import Optional, Any, Dict, List
+import threading 
 from Phidget22.PhidgetException import PhidgetException, ErrorCode
 from Phidget22.Devices.VoltageRatioInput import VoltageRatioInput
 from Phidget22.VoltageRatioSensorType import VoltageRatioSensorType
@@ -15,16 +16,20 @@ from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager
 logger = logging.getLogger(__name__)
 
 class InfraredSensorAgent(SensorAgent):
-    """Infrared distance sensor agent using Phidget sensor with 3 channels."""
+    """Infrared distance sensor agent using Phidget sensor with 5 channels."""
 
     def __init__(self, sensor_id: str = "infrared", virtual_agent_id: str = "aircon", channel: int = 1,
                  mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
-        # Phidget sensors for 3 channels
+        
+        # Thread-safe initialization flag
+        self.hardware_ready = threading.Event()  # Starts as "not set"
+        
+        # Phidget sensors for 5 channels
         self.ir_sensors: Dict[int, Optional[VoltageRatioInput]] = {}
         self.sensor_initialized: Dict[int, bool] = {}
-        self.channels = [channel, channel + 1, channel + 2]
+        self.channels = [channel, channel + 1, channel + 2, channel + 3, channel + 4]
         
-        # Create sensor IDs for each channel (infrared_1, infrared_2, infrared_3)
+        # Create sensor IDs for each channel (infrared_1, infrared_2, infrared_3, infrared_4, infrared_5)
         self.sensor_ids = [f"{sensor_id}_{i+1}" for i in range(len(self.channels))]
         
         # Create a mapping of channels to sensor IDs
@@ -38,7 +43,7 @@ class InfraredSensorAgent(SensorAgent):
         self.FORMULA_VALID_SV_MAX = 490.0
         self.K_DISTANCE = 9462.0
         self.SV_OFFSET = 16.92
-        self.PROXIMITY_THRESHOLD_CM = 100.0
+        self.PROXIMITY_THRESHOLD_CM = 149.0
 
         # Device parameters
         self.DEVICE_SERIAL_NUMBER = 455869  # run this command to see the serial number "phidget22admin -d"
@@ -58,8 +63,12 @@ class InfraredSensorAgent(SensorAgent):
         # Initialize the base SensorAgent class with the first sensor ID
         # (This is mainly for compatibility with the parent class)
         super().__init__(self.sensor_ids[0], "infrared", virtual_agent_id, mqtt_broker, mqtt_port)
+        # super().__init__(sensor_id, "infrared", virtual_agent_id, mqtt_broker, mqtt_port)
+
+        self.set_reading_interval(1.0)
 
         # Initialize sensor hardware after everything is set up
+        # This will set self.hardware_ready when complete
         self.start_sensor()
 
         logger.info(f"[{self.agent_id}] InfraredSensorAgent initialized for channels {self.channels} with sensor IDs {self.sensor_ids}")
@@ -67,6 +76,11 @@ class InfraredSensorAgent(SensorAgent):
     def _read_and_publish(self):
         """Override parent method to publish each channel to its own topic."""
         try:
+            # Wait for hardware to be ready (max 10 seconds)
+            if not self.hardware_ready.wait(timeout=10.0):
+                logger.warning(f"[{self.agent_id}] Hardware initialization timeout - skipping read")
+                return
+            
             self.reading_count += 1
             # Read all channels and publish each one separately
             for channel in self.channels:
@@ -76,9 +90,9 @@ class InfraredSensorAgent(SensorAgent):
                     sensor_id = self.channel_to_sensor_id[channel]
                     
                     # Create readSensor event for this specific channel
+                    # No target field needed - routing handled by MQTT topic
                     event = EventFactory.create_sensor_event(
                         sensor_id=sensor_id,
-                        virtual_agent_id="*",  # Broadcast to all interested virtual agents
                         sensor_type=self.sensor_type,
                         value=value,
                         unit=unit,
@@ -96,7 +110,7 @@ class InfraredSensorAgent(SensorAgent):
 
     # Keep all your existing methods unchanged
     def initialize_sensor(self):
-        """Initialize the Phidget infrared sensors for all 3 channels."""
+        """Initialize the Phidget infrared sensors for all 5 channels."""
         logger.info(f"[{self.agent_id}] Initializing infrared sensors for channels {self.channels}...")
 
         # Clear any existing sensors
@@ -153,6 +167,9 @@ class InfraredSensorAgent(SensorAgent):
 
             if all_attached:
                 logger.info(f"[{self.agent_id}] All infrared sensors initialization successful")
+                # Signal that hardware is ready
+                self.hardware_ready.set()
+                logger.info(f"[{self.agent_id}] Hardware ready signal set - threads can now proceed")
             else:
                 logger.error(f"[{self.agent_id}] Some sensors failed to initialize")
                 # Clean up any successfully opened sensors
@@ -217,6 +234,11 @@ class InfraredSensorAgent(SensorAgent):
 
     def read_sensor_channel(self, channel: int) -> tuple[Any, Optional[str], Optional[Dict[str, Any]]]:
         """Read a specific sensor channel and calculate distance."""
+        # First check if hardware is ready (non-blocking check)
+        if not self.hardware_ready.is_set():
+            # Hardware not ready yet, return None without logging spam
+            return None, None, None
+            
         if not self.sensor_initialized.get(channel, False):
             current_time = time.time()
             if current_time - self._last_warn_times[channel]['init_fail'] > 5:
@@ -286,6 +308,11 @@ class InfraredSensorAgent(SensorAgent):
 
     def read_sensor(self) -> tuple[Any, Optional[str], Optional[Dict[str, Any]]]:
         """Read all infrared sensor channels and return combined data."""
+        # Wait for hardware to be ready before reading
+        if not self.hardware_ready.wait(timeout=10.0):
+            logger.warning(f"[{self.agent_id}] Hardware not ready for read_sensor() - timeout")
+            return None, None, None
+            
         all_readings = {}
         any_success = False
 

@@ -56,7 +56,6 @@ class Event:
     """Unified event structure for all system communications."""
     event: EventMetadata
     source: EntityInfo
-    target: EntityInfo
     payload: Dict[str, Any]
 
 # =============================================================================
@@ -101,14 +100,13 @@ class EventFactory:
     @staticmethod
     def create_sensor_event(
         sensor_id: str,
-        virtual_agent_id: str,
         sensor_type: str,
         value: Union[float, int, str, bool],
         unit: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         location: Optional[str] = None
     ) -> Event:
-        """Create a readSensor event from SensorAgent to VirtualAgent (ASYNCHRONOUS)."""
+        """Create a readSensor event from SensorAgent (ASYNCHRONOUS - broadcast to VirtualAgents)."""
         return Event(
             event=EventMetadata(
                 id="",  # Will be auto-generated
@@ -120,10 +118,6 @@ class EventFactory:
             source=EntityInfo(
                 entityType="sensorAgent",
                 entityId=sensor_id
-            ),
-            target=EntityInfo(
-                entityType="virtualAgent", 
-                entityId=virtual_agent_id
             ),
             payload=asdict(SensorPayload(
                 sensor_type=sensor_type,
@@ -141,7 +135,7 @@ class EventFactory:
         sensors: Optional[Dict[str, Any]] = None,
         location: Optional[str] = None
     ) -> Event:
-        """Create an updateContext event from VirtualAgent to ContextManager (ASYNCHRONOUS)."""
+        """Create an updateContext event from VirtualAgent (ASYNCHRONOUS - routed via MQTT topic)."""
         return Event(
             event=EventMetadata(
                 id="",
@@ -153,10 +147,6 @@ class EventFactory:
             source=EntityInfo(
                 entityType="virtualAgent",
                 entityId=virtual_agent_id
-            ),
-            target=EntityInfo(
-                entityType="contextManager",
-                entityId="CM-MainController"
             ),
             payload=asdict(ContextPayload(
                 agent_type=agent_type,
@@ -174,7 +164,7 @@ class EventFactory:
         location: Optional[str] = None,
         priority: str = "Normal"
     ) -> Event:
-        """Create an applyAction event from ContextManager to VirtualAgent (SYNCHRONOUS - Request)."""
+        """Create an applyAction event from ContextManager (SYNCHRONOUS Request - routed via MQTT topic)."""
         return Event(
             event=EventMetadata(
                 id="",
@@ -186,10 +176,6 @@ class EventFactory:
             source=EntityInfo(
                 entityType="contextManager",
                 entityId="CM-MainController"
-            ),
-            target=EntityInfo(
-                entityType="virtualAgent",
-                entityId=virtual_agent_id
             ),
             payload=asdict(ActionPayload(
                 actionName=action_name,
@@ -205,7 +191,7 @@ class EventFactory:
         message: Optional[str] = None,
         new_state: Optional[Dict[str, Any]] = None
     ) -> Event:
-        """Create an actionReport event from VirtualAgent to ContextManager (SYNCHRONOUS - Response)."""
+        """Create an actionReport event from VirtualAgent (SYNCHRONOUS Response - routed via MQTT topic)."""
         return Event(
             event=EventMetadata(
                 id="",
@@ -215,10 +201,6 @@ class EventFactory:
             source=EntityInfo(
                 entityType="virtualAgent",
                 entityId=virtual_agent_id
-            ),
-            target=EntityInfo(
-                entityType="contextManager",
-                entityId="CM-MainController"
             ),
             payload=asdict(ActionReportPayload(
                 command_id=command_id,
@@ -244,13 +226,11 @@ class MQTTMessage:
         # Reconstruct the Event object
         event_data = data["event"]
         source_data = data["source"]
-        target_data = data["target"]
         payload_data = data["payload"]
         
         return Event(
             event=EventMetadata(**event_data),
             source=EntityInfo(**source_data),
-            target=EntityInfo(**target_data),
             payload=payload_data
         )
     

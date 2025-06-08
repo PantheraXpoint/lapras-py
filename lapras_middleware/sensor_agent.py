@@ -59,10 +59,9 @@ class SensorAgent(Agent, ABC):
                 self.reading_count += 1
                 
                 # Create readSensor event using EventFactory (ASYNCHRONOUS - BROADCAST)
-                # No specific target virtual agent - this is a broadcast event
+                # No target field needed - routing handled by MQTT topic
                 event = EventFactory.create_sensor_event(
                     sensor_id=self.agent_id,
-                    virtual_agent_id="*",  # Broadcast to all interested virtual agents
                     sensor_type=self.sensor_type,
                     value=value,
                     unit=unit,

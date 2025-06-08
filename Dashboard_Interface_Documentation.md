@@ -16,8 +16,8 @@ All MQTT messages use the standardized Event structure from `lapras_middleware/e
 class Event:
     event: EventMetadata      # id, timestamp, type, location, priority
     source: EntityInfo        # entityType, entityId  
-    target: EntityInfo        # entityType, entityId
     payload: Dict[str, Any]   # Flexible data container
+    # Note: target field removed - routing handled by MQTT topics
 ```
 
 ## Dashboard MQTT Topics
@@ -42,10 +42,6 @@ class Event:
   "source": {
     "entityType": "contextManager",
     "entityId": "CM-MainController"
-  },
-  "target": {
-    "entityType": "dashboard", 
-    "entityId": "dashboard-client"
   },
   "payload": {
     "agents": {
@@ -119,10 +115,6 @@ class Event:
     "entityType": "contextManager",
     "entityId": "CM-MainController"
   },
-  "target": {
-    "entityType": "dashboard",
-    "entityId": "dashboard-client"
-  },
   "payload": {
     "command_id": "cmd-12345",
     "success": true,
@@ -152,10 +144,6 @@ class Event:
   "source": {
     "entityType": "dashboard",
     "entityId": "dashboard-client" 
-  },
-  "target": {
-    "entityType": "contextManager",
-    "entityId": "CM-MainController"
   },
   "payload": {
     "agent_id": "VA-AirCon-LivingRoom",
@@ -260,10 +248,6 @@ class DashboardClient:
             "source": {
                 "entityType": "dashboard",
                 "entityId": "dashboard-client"
-            },
-            "target": {
-                "entityType": "contextManager", 
-                "entityId": "CM-MainController"
             },
             "payload": {
                 "agent_id": agent_id,
@@ -373,10 +357,6 @@ dashboard.send_command("VA-Light-Kitchen", "set_brightness", {"brightness": 80})
                     source: {
                         entityType: 'dashboard',
                         entityId: 'dashboard-client'
-                    },
-                    target: {
-                        entityType: 'contextManager',
-                        entityId: 'CM-MainController'
                     },
                     payload: {
                         agent_id: agentId,
@@ -541,10 +521,6 @@ mosquitto_pub -h 143.248.57.73 -t "dashboard/control/command" -m '{
   "source": {
     "entityType": "dashboard",
     "entityId": "dashboard-client"
-  },
-  "target": {
-    "entityType": "contextManager",
-    "entityId": "CM-MainController"
   },
   "payload": {
     "agent_id": "VA-AirCon-LivingRoom",

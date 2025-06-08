@@ -71,14 +71,10 @@ class DashboardSubscriber:
                 print(f"Event Type: {event.get('type', 'N/A')}")
                 print(f"Event Timestamp: {event.get('timestamp', 'N/A')}")
             
-            # Print source and target
+            # Print source information (target field removed - routing handled by MQTT topics)
             if 'source' in message_data:
                 source = message_data['source']
                 print(f"Source: {source.get('entityType', 'N/A')} - {source.get('entityId', 'N/A')}")
-            
-            if 'target' in message_data:
-                target = message_data['target']
-                print(f"Target: {target.get('entityType', 'N/A')} - {target.get('entityId', 'N/A')}")
             
             # Print payload information
             if 'payload' in message_data:
