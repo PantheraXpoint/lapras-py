@@ -17,7 +17,7 @@ from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager, Sen
 logger = logging.getLogger(__name__)
 
 class LightHueAgent(VirtualAgent):
-    def __init__(self, agent_id: str = "none", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, decision_window: int = 2):
+    def __init__(self, agent_id: str = "none", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, decision_window: int = 0.5):
         super().__init__(agent_id, "hue_light", mqtt_broker, mqtt_port)
         
         logger.info(f"[{self.agent_id}] LightHueAgent initialized")
@@ -42,6 +42,8 @@ class LightHueAgent(VirtualAgent):
         self.add_sensor_agent("infrared_1")
         self.add_sensor_agent("infrared_2")
         self.add_sensor_agent("infrared_3")
+        self.add_sensor_agent("infrared_4")
+        self.add_sensor_agent("infrared_5")
         
         logger.info(f"[{self.agent_id}] LightHueAgent initialization completed")
     
@@ -53,7 +55,8 @@ class LightHueAgent(VirtualAgent):
             
             # Check if we should process this message based on the decision window
             last_processed = self.last_sensor_processing.get(sensor_id, 0)
-            if current_time - last_processed < self.proximity_window:
+            current_processing_window = self.proximity_window  # Always use base window for processing
+            if current_time - last_processed < current_processing_window:
                 logger.info(f"[{self.agent_id}] Skipping message from {sensor_id} - too soon after last processing")
                 return
                 
@@ -86,47 +89,82 @@ class LightHueAgent(VirtualAgent):
 
                     logger.info(f"sensor states: {self.local_state.get('sensor_states', {})}, local state: {self.local_state}")
                     
-                    # Check if it's time to make a decision (every 2 seconds)
-                    if current_time - self.local_state["last_decision_time"] >= self.proximity_window:
-                        # Make decision based on collected data
-                        any_near = False
-                        all_far = True
-                        active_sensors = 0
-                        
-                        for sid, state in self.local_state["sensor_states"].items():
-                            # Only consider states within the time window
-                            # if current_time - state["timestamp"] <= self.proximity_window:
-                            active_sensors += 1
-                            if state["status"] == "near":
-                                any_near = True
-                                # Don't break here - we need to check all sensors
-                            elif state["status"] == "far":
-                                # If any sensor is far, we can't say all are far yet
-                                pass
-                            else:
-                                # Unknown state, can't make a determination
-                                all_far = False
-                                # Don't break here - we need to check all sensors
-                        
-                        # Make decision and update state
-                        if any_near:
-                            new_proximity = "near"
-                            logger.info(f"[{self.agent_id}] Decision: Turning ON light (any sensor near in last {self.proximity_window}s)")
-                        elif all_far and active_sensors > 0:  # Only set to far if we have at least one active sensor
-                            new_proximity = "far"
-                            logger.info(f"[{self.agent_id}] Decision: Turning OFF light (all {active_sensors} sensors far in last {self.proximity_window}s)")
+                    # Extended window logic
+                    base_window = self.proximity_window
+                    extended_multiplier = 10  # Your N value
+                    
+                    # Collect current sensor states
+                    any_near = False
+                    all_far = True
+                    active_sensors = 0
+                    
+                    for sid, state in self.local_state["sensor_states"].items():
+                        active_sensors += 1
+                        if state["status"] == "near":
+                            any_near = True
+                        elif state["status"] == "far":
+                            pass
                         else:
-                            new_proximity = self.local_state.get("proximity_status", "unknown")
+                            all_far = False
+                    
+                    # Process based on current power state
+                    if self.local_state.get("power") == "on":
+                        # Light is ON
+                        if any_near:
+                            # We see near - reset the timer by updating last_decision_time
+                            self.local_state["last_decision_time"] = current_time
+                            new_proximity = "near"
+                            logger.info(f"[{self.agent_id}] Near detected - extending window for {extended_multiplier * base_window}s")
+                            
+                            # Update proximity status if changed
+                            if new_proximity != self.local_state.get("proximity_status"):
+                                self.local_state["proximity_status"] = new_proximity
+                                logger.info(f"[{self.agent_id}] Updated proximity status to: {new_proximity}")
+                                self._trigger_state_publication()
+                            return  # Don't process further, just extend the window
+                        
+                        elif all_far and active_sensors > 0:
+                            # All sensors are far - check if we're still in extended window
+                            time_since_last_near = current_time - self.local_state["last_decision_time"]
+                            extended_window_duration = extended_multiplier * base_window
+                            
+                            if time_since_last_near < extended_window_duration:
+                                # Still in extended window, don't turn off
+                                logger.info(f"[{self.agent_id}] All far but still in extended window ({time_since_last_near:.1f}s/{extended_window_duration}s)")
+                                return  # Don't change anything
+                            else:
+                                # Extended window expired, can turn off
+                                new_proximity = "far"
+                                logger.info(f"[{self.agent_id}] Decision: Turning OFF light (extended window expired, all {active_sensors} sensors far)")
+                                
+                                # Update proximity status and trigger publication
+                                if new_proximity != self.local_state.get("proximity_status"):
+                                    self.local_state["proximity_status"] = new_proximity
+                                    logger.info(f"[{self.agent_id}] Updated proximity status to: {new_proximity}")
+                                    self._trigger_state_publication()
+                                return
+                        else:
+                            # Unknown states, no change
                             logger.info(f"[{self.agent_id}] Decision: No change (inconclusive sensor states)")
-                        
-                        # Update state and trigger publication if changed
-                        if new_proximity != self.local_state.get("proximity_status"):
-                            self.local_state["proximity_status"] = new_proximity
-                            logger.info(f"[{self.agent_id}] Updated proximity status to: {new_proximity}")
-                            self._trigger_state_publication()
-                        
-                        # Update last decision time
-                        self.local_state["last_decision_time"] = current_time
+                            return
+                            
+                    else:
+                        # Light is OFF - use normal logic with base window
+                        if current_time - self.local_state["last_decision_time"] >= base_window:
+                            if any_near:
+                                new_proximity = "near"
+                                logger.info(f"[{self.agent_id}] Decision: Turning ON light (sensor near)")
+                                
+                                # Update last decision time and proximity status
+                                self.local_state["last_decision_time"] = current_time
+                                if new_proximity != self.local_state.get("proximity_status"):
+                                    self.local_state["proximity_status"] = new_proximity
+                                    logger.info(f"[{self.agent_id}] Updated proximity status to: {new_proximity}")
+                                    self._trigger_state_publication()
+                            else:
+                                logger.info(f"[{self.agent_id}] Decision: No change (no near sensors)")
+                        else:
+                            logger.info(f"[{self.agent_id}] Not time to make decision yet (OFF state)")
                     
                     # Log the sensor update
                     # logger.info(f"[{self.agent_id}] Updated from IR sensor: distance={sensor_payload.value}{sensor_payload.unit}, proximity={sensor_payload.metadata['proximity_status']}")
@@ -140,6 +178,23 @@ class LightHueAgent(VirtualAgent):
             with self.state_lock:
                 logger.info(f"[{self.agent_id}] Current state: {self.local_state}")
             self._last_perception_log = current_time
+            
+    def _clean_data_for_serialization(self, data):
+        """Clean data to ensure it's serializable."""
+        if isinstance(data, dict):
+            cleaned = {}
+            for key, value in data.items():
+                if isinstance(value, (str, int, float, bool, type(None))):
+                    cleaned[key] = value
+                elif isinstance(value, dict):
+                    cleaned[key] = self._clean_data_for_serialization(value)
+                elif isinstance(value, list):
+                    cleaned[key] = [self._clean_data_for_serialization(item) if isinstance(item, dict) else item for item in value]
+                else:
+                    # Convert other types to string
+                    cleaned[key] = str(value)
+            return cleaned
+        return data
 
     def _update_sensor_data(self, event, sensor_payload: SensorPayload):
         """Update sensor data and trigger perception update."""
@@ -195,8 +250,14 @@ class LightHueAgent(VirtualAgent):
         
         # Always publish updateContext for sensor data (frequent updates are good for monitoring)
         # logger.info(f"[{self.agent_id}] DEBUG: About to call _publish_context_update")
-        self._publish_context_update_with_data(complete_state, sensor_data_copy)
+        # self._publish_context_update_with_data(complete_state, sensor_data_copy)
         # logger.info(f"[{self.agent_id}] DEBUG: _publish_context_update returned")
+        
+        # Clean the data before publishing
+        clean_complete_state = self._clean_data_for_serialization(complete_state)
+        clean_sensor_data = self._clean_data_for_serialization(sensor_data_copy)
+        
+        self._publish_context_update_with_data(clean_complete_state, clean_sensor_data)
         
         # Log differently based on whether proximity changed
         if proximity_changed:

@@ -39,7 +39,7 @@ class VirtualAgent(Agent, ABC):
         self.publish_thread.start()
         
         # Publish initial state after a short delay to ensure MQTT is connected
-        threading.Timer(1.0, self._publish_initial_state).start()
+        threading.Timer(1.0, lambda: self._publish_initial_state).start()
     
     def _on_connect(self, client, userdata, flags, rc):
         """Override Agent's _on_connect to add virtual agent specific subscriptions."""
@@ -131,8 +131,9 @@ class VirtualAgent(Agent, ABC):
         
         logger.info(f"[{self.agent_id}] DEBUG: _update_sensor_data started for sensor {sensor_id}")
         
-        # Track if proximity status changed (for infrared sensors)
-        proximity_changed = False
+        # Track if any metadata changed (generalizable for any sensor type)
+        metadata_changed = False
+        changed_metadata_fields = []
         complete_state = None
         sensor_data_copy = None
         
@@ -150,14 +151,20 @@ class VirtualAgent(Agent, ABC):
                 "timestamp": event.event.timestamp
             }
             
-            # Check if proximity status changed for infrared sensors
-            if sensor_payload.sensor_type == "infrared" and sensor_payload.metadata:
-                old_proximity = old_sensor_data.get("metadata", {}).get("proximity_status") if old_sensor_data else None
-                new_proximity = sensor_payload.metadata.get("proximity_status")
+            # Generic metadata change detection (works for any sensor type)
+            if sensor_payload.metadata:
+                old_metadata = old_sensor_data.get("metadata", {}) if old_sensor_data else {}
                 
-                if old_proximity != new_proximity:
-                    proximity_changed = True
-                    logger.info(f"[{self.agent_id}] Proximity status changed: '{old_proximity}' → '{new_proximity}'")
+                # Check for any metadata field changes
+                for key, new_value in sensor_payload.metadata.items():
+                    old_value = old_metadata.get(key)
+                    if old_value != new_value:
+                        metadata_changed = True
+                        changed_metadata_fields.append(f"{key}: '{old_value}' → '{new_value}'")
+                
+                # Log metadata changes generically
+                if metadata_changed:
+                    logger.info(f"[{self.agent_id}] Sensor {sensor_id} metadata changed: {', '.join(changed_metadata_fields)}")
             
             # Prepare data for publishing while we have the lock
             complete_state = self.local_state.copy()
@@ -181,9 +188,9 @@ class VirtualAgent(Agent, ABC):
         self._publish_context_update_with_data(complete_state, sensor_data_copy)
         logger.info(f"[{self.agent_id}] DEBUG: _publish_context_update returned")
         
-        # Log differently based on whether proximity changed
-        if proximity_changed:
-            logger.info(f"[{self.agent_id}] Published context update - PROXIMITY CHANGED: {sensor_payload.value}{sensor_payload.unit}")
+        # Generic logging based on whether any metadata changed
+        if metadata_changed:
+            logger.info(f"[{self.agent_id}] Published context update - METADATA CHANGED: {sensor_payload.value}{sensor_payload.unit} ({', '.join(changed_metadata_fields)})")
         else:
             logger.info(f"[{self.agent_id}] Published context update - sensor reading: {sensor_payload.value}{sensor_payload.unit}")
         
@@ -333,8 +340,8 @@ class VirtualAgent(Agent, ABC):
                 
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error publishing context update: {e}")
-            import traceback
-            logger.error(f"[{self.agent_id}] Publish context traceback: {traceback.format_exc()}")
+            # import traceback
+            # logger.error(f"[{self.agent_id}] Publish context traceback: {traceback.format_exc()}")
 
     def _publish_context_update(self):
         """Publish updateContext event with current complete state (legacy method - acquires lock)."""
