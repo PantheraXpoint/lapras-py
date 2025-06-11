@@ -12,9 +12,9 @@ from lapras_agents.infrared_sensor_agent import InfraredSensorAgent
 
 def main():
     # Set up logging
-    parser = argparse.ArgumentParser(description='Start the infrared sensor agent for 3 consecutive channels')
+    parser = argparse.ArgumentParser(description='Start the infrared sensor agent for 4 consecutive channels')
     parser.add_argument('--channel', type=int, default=1, 
-                       help='Starting channel number (will use this channel + 1 and + 2 for 3 sensors total)')
+                       help='Starting channel number (will use this channel + 1, + 2, and + 3 for 4 sensors total)')
     parser.add_argument('--sensor_id', type=str, default="infrared", 
                        help='Sensor ID for the multi-channel infrared sensor')
     parser.add_argument('--virtual_agent_id', type=str, default="any", 
@@ -27,8 +27,8 @@ def main():
     )
     logger = logging.getLogger(__name__)
     
-    # Calculate the 3 channels that will be used
-    channels = [args.channel, args.channel + 1, args.channel + 2]
+    # Calculate the 4 channels that will be used
+    channels = [args.channel, args.channel + 1, args.channel + 2, args.channel + 3]
     logger.info(f"[INFRARED_SENSOR] Starting infrared sensor agent for channels: {channels}")
     logger.info(f"[INFRARED_SENSOR] Note: Sensor will broadcast to ALL virtual agents, regardless of virtual_agent_id setting")
     agent = None
@@ -56,13 +56,29 @@ def main():
                     value, unit, metadata = agent.read_sensor()
                     if metadata and "readings" in metadata:
                         readings_summary = []
+                        total_channels = len(agent.channels)
+                        successful_readings = len(metadata["readings"])
+                        near_count = 0
+                        
                         for channel_key, reading_data in metadata["readings"].items():
                             channel_num = channel_key.replace("channel_", "")
                             proximity = reading_data["metadata"].get("proximity_status", "unknown")
                             distance = reading_data["value"]
+                            if proximity == "near":
+                                near_count += 1
                             readings_summary.append(f"Ch{channel_num}: {distance}cm ({proximity})")
                         
-                        logger.info(f"[INFRARED_SENSOR] Current readings - {' | '.join(readings_summary)}")
+                        logger.info(f"[INFRARED_SENSOR] Status: {successful_readings}/{total_channels} channels successful, {near_count} near")
+                        if successful_readings > 0:
+                            logger.info(f"[INFRARED_SENSOR] Sample readings: {' | '.join(readings_summary[:3])}")
+                            if len(readings_summary) > 3:
+                                logger.info(f"[INFRARED_SENSOR] ... and {len(readings_summary) - 3} more channels")
+                        
+                        # Show info about failed channels (if any)
+                        failed_channels = total_channels - successful_readings
+                        if failed_channels > 0:
+                            logger.warning(f"[INFRARED_SENSOR] {failed_channels} channels failed to read")
+                            
                     else:
                         logger.warning(f"[INFRARED_SENSOR] No sensor readings available")
                 except Exception as e:

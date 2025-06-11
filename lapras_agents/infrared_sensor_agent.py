@@ -24,12 +24,13 @@ class InfraredSensorAgent(SensorAgent):
         # Thread-safe initialization flag
         self.hardware_ready = threading.Event()  # Starts as "not set"
         
-        # Phidget sensors for 5 channels
+        # Phidget sensors for 4 channels
         self.ir_sensors: Dict[int, Optional[VoltageRatioInput]] = {}
         self.sensor_initialized: Dict[int, bool] = {}
-        self.channels = [channel, channel + 1, channel + 2, channel + 3, channel + 4]
+        # self.channels = [channel, channel + 1, channel + 2, channel + 3]
+        self.channels = [channel, channel + 1]
         
-        # Create sensor IDs for each channel (infrared_1, infrared_2, infrared_3, infrared_4, infrared_5)
+        # Create sensor IDs for each channel (infrared_1, infrared_2, infrared_3, infrared_4)
         self.sensor_ids = [f"{sensor_id}_{i+1}" for i in range(len(self.channels))]
         
         # Create a mapping of channels to sensor IDs
@@ -43,7 +44,7 @@ class InfraredSensorAgent(SensorAgent):
         self.FORMULA_VALID_SV_MAX = 490.0
         self.K_DISTANCE = 9462.0
         self.SV_OFFSET = 16.92
-        self.PROXIMITY_THRESHOLD_CM = 149.0
+        self.PROXIMITY_THRESHOLD_CM = 120.0
 
         # Device parameters
         self.DEVICE_SERIAL_NUMBER = 455869  # run this command to see the serial number "phidget22admin -d"
@@ -110,7 +111,7 @@ class InfraredSensorAgent(SensorAgent):
 
     # Keep all your existing methods unchanged
     def initialize_sensor(self):
-        """Initialize the Phidget infrared sensors for all 5 channels."""
+        """Initialize the Phidget infrared sensors for all 4 channels."""
         logger.info(f"[{self.agent_id}] Initializing infrared sensors for channels {self.channels}...")
 
         # Clear any existing sensors
