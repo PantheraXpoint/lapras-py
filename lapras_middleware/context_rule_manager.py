@@ -187,10 +187,6 @@ class ContextRuleManager:
                     entityType="contextManager",
                     entityId="CM-MainController"
                 ),
-                target=EntityInfo(
-                    entityType="dashboard",
-                    entityId="dashboard-client"
-                ),
                 payload={
                     "command_id": command_id,
                     "success": success,
@@ -253,10 +249,6 @@ class ContextRuleManager:
                     source=EntityInfo(
                         entityType="contextManager",
                         entityId="CM-MainController"
-                    ),
-                    target=EntityInfo(
-                        entityType="dashboard",
-                        entityId="dashboard-client"
                     ),
                     payload={
                         "agents": {},

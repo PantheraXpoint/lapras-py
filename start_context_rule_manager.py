@@ -99,8 +99,11 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
     
     try:
-        # Initialize and run context rule manager
-        context_rule_manager = ContextRuleManager()
+        # Initialize and run context rule manager with proper MQTT configuration
+        context_rule_manager = ContextRuleManager(
+            mqtt_broker="143.248.57.73",
+            mqtt_port=1883
+        )
         
         # Load rules from unified rules file
         context_rule_manager.load_rules("lapras_middleware/rules/rules.ttl")

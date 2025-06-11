@@ -7,7 +7,13 @@ Subscribes to 'dashboard/context/state' topic and prints received messages.
 import json
 import logging
 import time
+import sys
+import os
 import paho.mqtt.client as mqtt
+
+# Add the lapras_middleware to the path
+sys.path.append('lapras_middleware')
+from lapras_middleware.event import MQTTMessage
 
 # Configure logging
 logging.basicConfig(
@@ -55,9 +61,9 @@ class DashboardSubscriber:
             logger.info(f"Message received on topic: {msg.topic}")
             logger.info(f"QoS: {msg.qos}, Retain: {msg.retain}")
             
-            # Parse the JSON message
+            # Parse using MQTTMessage.deserialize() to match ContextRuleManager format
             message_str = msg.payload.decode('utf-8')
-            message_data = json.loads(message_str)
+            event = MQTTMessage.deserialize(message_str)
             
             # Print the message structure
             print("\n" + "="*80)
@@ -65,60 +71,55 @@ class DashboardSubscriber:
             print("="*80)
             
             # Print event metadata
-            if 'event' in message_data:
-                event = message_data['event']
-                print(f"Event ID: {event.get('id', 'N/A')}")
-                print(f"Event Type: {event.get('type', 'N/A')}")
-                print(f"Event Timestamp: {event.get('timestamp', 'N/A')}")
+            print(f"Event ID: {event.event.id}")
+            print(f"Event Type: {event.event.type}")
+            print(f"Event Timestamp: {event.event.timestamp}")
             
-            # Print source information (target field removed - routing handled by MQTT topics)
-            if 'source' in message_data:
-                source = message_data['source']
-                print(f"Source: {source.get('entityType', 'N/A')} - {source.get('entityId', 'N/A')}")
+            # Print source information
+            print(f"Source: {event.source.entityType} - {event.source.entityId}")
             
             # Print payload information
-            if 'payload' in message_data:
-                payload = message_data['payload']
-                
-                # Print summary
-                if 'summary' in payload:
-                    summary = payload['summary']
-                    print(f"\nSUMMARY:")
-                    print(f"  Total Agents: {summary.get('total_agents', 0)}")
-                    print(f"  Known Agents: {summary.get('known_agents', [])}")
-                    print(f"  Last Update: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(summary.get('last_update', 0)))}")
-                
-                # Print agent details
-                if 'agents' in payload and payload['agents']:
-                    print(f"\nAGENT DETAILS:")
-                    for agent_id, agent_info in payload['agents'].items():
-                        print(f"\n  Agent: {agent_id}")
-                        print(f"    Type: {agent_info.get('agent_type', 'N/A')}")
-                        print(f"    Responsive: {agent_info.get('is_responsive', False)}")
-                        print(f"    Last Update: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(agent_info.get('last_update', 0)))}")
-                        
-                        # Print state
-                        if 'state' in agent_info:
-                            print(f"    State:")
-                            for key, value in agent_info['state'].items():
-                                print(f"      {key}: {value}")
-                        
-                        # Print sensors
-                        if 'sensors' in agent_info and agent_info['sensors']:
-                            print(f"    Sensors:")
-                            for sensor_key, sensor_value in agent_info['sensors'].items():
-                                print(f"      {sensor_key}: {sensor_value}")
-                else:
-                    print(f"\nNo agents currently connected.")
+            payload = event.payload
+            
+            # Print summary
+            if 'summary' in payload:
+                summary = payload['summary']
+                print(f"\nSUMMARY:")
+                print(f"  Total Agents: {summary.get('total_agents', 0)}")
+                print(f"  Known Agents: {summary.get('known_agents', [])}")
+                print(f"  Last Update: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(summary.get('last_update', 0)))}")
+            
+            # Print agent details
+            if 'agents' in payload and payload['agents']:
+                print(f"\nAGENT DETAILS:")
+                for agent_id, agent_info in payload['agents'].items():
+                    print(f"\n  Agent: {agent_id}")
+                    print(f"    Type: {agent_info.get('agent_type', 'N/A')}")
+                    print(f"    Responsive: {agent_info.get('is_responsive', False)}")
+                    print(f"    Last Update: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(agent_info.get('last_update', 0)))}")
+                    
+                    # Print state
+                    if 'state' in agent_info:
+                        print(f"    State:")
+                        for key, value in agent_info['state'].items():
+                            print(f"      {key}: {value}")
+                    
+                    # Print sensors
+                    if 'sensors' in agent_info and agent_info['sensors']:
+                        print(f"    Sensors:")
+                        for sensor_key, sensor_value in agent_info['sensors'].items():
+                            print(f"      {sensor_key}: {sensor_value}")
+            else:
+                print(f"\nNo agents currently connected.")
             
             print("="*80 + "\n")
             
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON message: {e}")
-            logger.error(f"Raw message: {msg.payload.decode('utf-8', errors='ignore')}")
+            logger.error(f"Failed to parse message as Event structure: {e}")
+            logger.error(f"Raw message: {msg.payload.decode('utf-8', errors='ignore')[:500]}...")
         except Exception as e:
             logger.error(f"Error processing message: {e}")
-            logger.error(f"Raw message: {msg.payload.decode('utf-8', errors='ignore')}")
+            logger.error(f"Raw message: {msg.payload.decode('utf-8', errors='ignore')[:500]}...")
 
     def start(self):
         """Start the subscriber."""

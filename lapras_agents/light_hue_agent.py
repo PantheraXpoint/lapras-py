@@ -27,7 +27,7 @@ class LightHueAgent(VirtualAgent):
             "power": "on",
             "proximity_status": "unknown",
             "sensor_states": {},  # Store sensor states with timestamps
-            "last_decision_time": 0.0
+            "last_decision_time": time.time()  # Initialize to current time instead of 0.0
         })
         
         # Add time window tracking for proximity states
@@ -41,9 +41,8 @@ class LightHueAgent(VirtualAgent):
         # self.add_sensor_agent("infrared_1", "infrared_2", "infrared_3")
         self.add_sensor_agent("infrared_1")
         self.add_sensor_agent("infrared_2")
-        self.add_sensor_agent("infrared_3")
-        self.add_sensor_agent("infrared_4")
-        self.add_sensor_agent("infrared_5")
+        # self.add_sensor_agent("infrared_3")
+        # self.add_sensor_agent("infrared_4")
         
         logger.info(f"[{self.agent_id}] LightHueAgent initialization completed")
     
@@ -91,7 +90,7 @@ class LightHueAgent(VirtualAgent):
                     
                     # Extended window logic
                     base_window = self.proximity_window
-                    extended_multiplier = 10  # Your N value
+                    extended_multiplier = 30  # Your N value
                     
                     # Collect current sensor states
                     any_near = False
@@ -330,6 +329,8 @@ class LightHueAgent(VirtualAgent):
             if action_payload.actionName == "turn_on":
                 with self.state_lock:
                     self.local_state["power"] = "on"
+                    # Reset the extended window timer when manually turning on
+                    self.local_state["last_decision_time"] = time.time()
                     new_state = self.local_state.copy()
                     result = self.__turn_on_light()
                 # success = True
