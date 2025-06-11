@@ -332,7 +332,7 @@ Examples:
     parser.add_argument('--type', 
                        choices=['temperature', 'activity', 'door', 'motion', 'light', 'tilt'],
                        help='Type of sensor to monitor')
-    parser.add_argument('--network-id', type=int, 
+    parser.add_argument('--network-id', type=int, default=61731,
                        help='Network ID to filter by (e.g., 61731 for seminar room)')
     parser.add_argument('--interval', type=int, default=500,
                        help='Monitoring interval in milliseconds (default: 500ms)')
