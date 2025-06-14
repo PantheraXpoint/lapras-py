@@ -33,4 +33,4 @@ lapras:HueLightOffWhenFarRule a lapras:Rule ;
     lapras:hasCondition lapras:IsFarCondition ;
     lapras:hasAction lapras:SetHueLightPowerOff .
 
-lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' .
+lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' . 

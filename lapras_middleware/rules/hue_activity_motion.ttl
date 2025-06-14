@@ -1,0 +1,53 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Hue light activity + motion sensor OR logic rules ---
+# Turn ON light if EITHER activity is detected OR motion is detected
+# Turn OFF light only if BOTH activity is inactive AND motion is no_motion
+
+# Turn ON light when activity is detected (activity_status = "active")
+lapras:HueLightOnWhenActiveRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsActiveCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOn .
+
+lapras:IsActiveCondition
+    lapras:hasSensor "activity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "active" .
+
+lapras:SetHueLightPowerOn lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn ON light when motion is detected (motion_status = "motion")
+lapras:HueLightOnWhenMotionRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsMotionCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOnFromMotion .
+
+lapras:IsMotionCondition
+    lapras:hasSensor "motion_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "motion" .
+
+lapras:SetHueLightPowerOnFromMotion lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn OFF light when BOTH activity is inactive AND motion is no_motion
+lapras:HueLightOffWhenInactiveAndNoMotionRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsInactiveCondition ;
+    lapras:hasCondition lapras:IsNoMotionCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOff .
+
+lapras:IsInactiveCondition
+    lapras:hasSensor "activity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "inactive" .
+
+lapras:IsNoMotionCondition
+    lapras:hasSensor "motion_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "no_motion" .
+
+lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' .

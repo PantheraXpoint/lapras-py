@@ -1,0 +1,53 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Hue light infrared + activity sensor OR logic rules ---
+# Turn ON light if EITHER person is near OR activity is detected
+# Turn OFF light only if BOTH person is far AND activity is inactive
+
+# Turn ON light when person is near (proximity_status = "near")
+lapras:HueLightOnWhenNearRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsNearCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOn .
+
+lapras:IsNearCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:SetHueLightPowerOn lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn ON light when activity is detected (activity_status = "active")
+lapras:HueLightOnWhenActiveRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsActiveCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOnFromActivity .
+
+lapras:IsActiveCondition
+    lapras:hasSensor "activity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "active" .
+
+lapras:SetHueLightPowerOnFromActivity lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn OFF light when BOTH person is far AND activity is inactive
+lapras:HueLightOffWhenFarAndInactiveRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsFarCondition ;
+    lapras:hasCondition lapras:IsInactiveCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOff .
+
+lapras:IsFarCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:IsInactiveCondition
+    lapras:hasSensor "activity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "inactive" .
+
+lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' .

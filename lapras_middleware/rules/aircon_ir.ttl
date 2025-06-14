@@ -1,0 +1,32 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Aircon infrared sensor rules ---
+
+# Turn ON aircon when person is near (proximity_status = "near")
+lapras:AirconOnWhenNearRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsNearCondition ;
+    lapras:hasAction lapras:SetAirconPowerOn .
+
+lapras:IsNearCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:SetAirconPowerOn lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn OFF aircon when person is far (proximity_status = "far")
+lapras:AirconOffWhenFarRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsFarCondition ;
+    lapras:hasAction lapras:SetAirconPowerOff .
+
+lapras:IsFarCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:SetAirconPowerOff lapras:hasStateUpdate '{"power": "off"}' .

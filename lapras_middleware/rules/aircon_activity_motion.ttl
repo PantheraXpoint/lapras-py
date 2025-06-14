@@ -1,0 +1,53 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Aircon activity + motion sensor OR logic rules ---
+# Turn ON aircon if EITHER activity is detected OR motion is detected
+# Turn OFF aircon only if BOTH activity is inactive AND motion is no_motion
+
+# Turn ON aircon when activity is detected (activity_status = "active")
+lapras:AirconOnWhenActiveRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsActiveCondition ;
+    lapras:hasAction lapras:SetAirconPowerOn .
+
+lapras:IsActiveCondition
+    lapras:hasSensor "activity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "active" .
+
+lapras:SetAirconPowerOn lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn ON aircon when motion is detected (motion_status = "motion")
+lapras:AirconOnWhenMotionRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsMotionCondition ;
+    lapras:hasAction lapras:SetAirconPowerOnFromMotion .
+
+lapras:IsMotionCondition
+    lapras:hasSensor "motion_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "motion" .
+
+lapras:SetAirconPowerOnFromMotion lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn OFF aircon when BOTH activity is inactive AND motion is no_motion
+lapras:AirconOffWhenInactiveAndNoMotionRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsInactiveCondition ;
+    lapras:hasCondition lapras:IsNoMotionCondition ;
+    lapras:hasAction lapras:SetAirconPowerOff .
+
+lapras:IsInactiveCondition
+    lapras:hasSensor "activity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "inactive" .
+
+lapras:IsNoMotionCondition
+    lapras:hasSensor "motion_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "no_motion" .
+
+lapras:SetAirconPowerOff lapras:hasStateUpdate '{"power": "off"}' .

@@ -1,0 +1,32 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Aircon motion sensor rules ---
+
+# Turn ON aircon when motion is detected (motion_status = "motion")
+lapras:AirconOnWhenMotionRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsMotionCondition ;
+    lapras:hasAction lapras:SetAirconPowerOn .
+
+lapras:IsMotionCondition
+    lapras:hasSensor "motion_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "motion" .
+
+lapras:SetAirconPowerOn lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn OFF aircon when no motion is detected (motion_status = "no_motion")
+lapras:AirconOffWhenNoMotionRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsNoMotionCondition ;
+    lapras:hasAction lapras:SetAirconPowerOff .
+
+lapras:IsNoMotionCondition
+    lapras:hasSensor "motion_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "no_motion" .
+
+lapras:SetAirconPowerOff lapras:hasStateUpdate '{"power": "off"}' .

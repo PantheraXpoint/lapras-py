@@ -1,0 +1,71 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# =============================================================================
+# SHARED SENSOR CONDITIONS
+# This file contains common sensor condition definitions that can be reused
+# across multiple rule files, avoiding duplication and ensuring consistency.
+# =============================================================================
+
+# --- Infrared/Proximity Sensor Conditions ---
+lapras:IsNearCondition
+    lapras:hasSensor "proximity_status" ; 
+    lapras:hasOperator lapras:equals ; 
+    lapras:hasValue "near" .
+
+lapras:IsFarCondition
+    lapras:hasSensor "proximity_status" ; 
+    lapras:hasOperator lapras:equals ; 
+    lapras:hasValue "far" .
+
+# --- Motion Sensor Conditions ---
+lapras:HasMotionCondition
+    lapras:hasSensor "motion_status" ; 
+    lapras:hasOperator lapras:equals ; 
+    lapras:hasValue "motion" .
+
+lapras:NoMotionCondition
+    lapras:hasSensor "motion_status" ; 
+    lapras:hasOperator lapras:equals ; 
+    lapras:hasValue "no_motion" .
+
+# --- Activity Sensor Conditions ---
+lapras:IsActiveCondition
+    lapras:hasSensor "activity_status" ; 
+    lapras:hasOperator lapras:equals ; 
+    lapras:hasValue "active" .
+
+lapras:IsInactiveCondition
+    lapras:hasSensor "activity_status" ; 
+    lapras:hasOperator lapras:equals ; 
+    lapras:hasValue "inactive" .
+
+# --- Temperature Sensor Conditions (if needed) ---
+lapras:HighTemperatureCondition
+    lapras:hasSensor "temperature" ; 
+    lapras:hasOperator lapras:greaterThan ; 
+    lapras:hasValue "25" .
+
+lapras:LowTemperatureCondition
+    lapras:hasSensor "temperature" ; 
+    lapras:hasOperator lapras:lessThan ; 
+    lapras:hasValue "20" .
+
+# =============================================================================
+# USAGE NOTES:
+# 
+# 1. Include this file when loading rules:
+#    python start_context_rule_manager.py --rules \
+#      lapras_middleware/rules/shared_conditions.ttl \
+#      lapras_middleware/rules/hue_ir.ttl
+#
+# 2. Individual rule files can reference these conditions:
+#    lapras:HueLightOnWhenNearRule a lapras:Rule ;
+#        lapras:hasAgent "hue_light" ;
+#        lapras:hasCondition lapras:IsNearCondition ;  # <-- Reference shared condition
+#        lapras:hasAction lapras:SetHueLightPowerOn .
+#
+# 3. This ensures consistency across all rules and makes updates easier
+# ============================================================================= 

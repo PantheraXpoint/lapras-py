@@ -1,0 +1,53 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Aircon infrared + motion sensor OR logic rules ---
+# Turn ON aircon if EITHER person is near OR motion is detected
+# Turn OFF aircon only if BOTH person is far AND motion is no_motion
+
+# Turn ON aircon when person is near (proximity_status = "near")
+lapras:AirconOnWhenNearRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsNearCondition ;
+    lapras:hasAction lapras:SetAirconPowerOn .
+
+lapras:IsNearCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:SetAirconPowerOn lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn ON aircon when motion is detected (motion_status = "motion")
+lapras:AirconOnWhenMotionRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsMotionCondition ;
+    lapras:hasAction lapras:SetAirconPowerOnFromMotion .
+
+lapras:IsMotionCondition
+    lapras:hasSensor "motion_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "motion" .
+
+lapras:SetAirconPowerOnFromMotion lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn OFF aircon when BOTH person is far AND motion is no_motion
+lapras:AirconOffWhenFarAndNoMotionRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsFarCondition ;
+    lapras:hasCondition lapras:IsNoMotionCondition ;
+    lapras:hasAction lapras:SetAirconPowerOff .
+
+lapras:IsFarCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:IsNoMotionCondition
+    lapras:hasSensor "motion_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "no_motion" .
+
+lapras:SetAirconPowerOff lapras:hasStateUpdate '{"power": "off"}' .

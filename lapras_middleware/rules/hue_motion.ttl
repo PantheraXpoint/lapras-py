@@ -1,0 +1,44 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Simple Hue light motion sensor rules ---
+
+# Turn ON light when activity is detected
+lapras:HueLightOnWhenMotionRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsActivityDetectedCondition ;
+    lapras:hasCondition lapras:IsLightOffCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOn .
+
+lapras:IsActivityDetectedCondition
+    lapras:hasSensor "activity_detected" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "true"^^xsd:boolean .
+
+lapras:IsLightOffCondition
+    lapras:hasSensor "power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "off" .
+
+lapras:SetHueLightPowerOn lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn OFF light when no activity is detected
+lapras:HueLightOffWhenNoMotionRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsLightOnCondition ;
+    lapras:hasCondition lapras:IsNoCurrentActivityCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOff .
+
+lapras:IsLightOnCondition
+    lapras:hasSensor "power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+lapras:IsNoCurrentActivityCondition
+    lapras:hasSensor "activity_detected" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "false"^^xsd:boolean .
+
+lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' .
