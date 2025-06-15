@@ -2,7 +2,7 @@ import logging
 import time
 import json
 import threading
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import uuid
 
 import paho.mqtt.client as mqtt
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class ContextRuleManager:
     """Combined context manager and rule executor that processes context states and applies rules."""
 
-    def __init__(self, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+    def __init__(self, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, rule_files: Optional[List[str]] = None):
         """Initialize the combined context rule manager."""
         self.service_id = "ContextRuleManager"
         
@@ -32,12 +32,20 @@ class ContextRuleManager:
         self.lapras = Namespace("http://lapras.org/rule/")
         self.rules_graph.bind("lapras", self.lapras)
         
+        # Track loaded rule files to avoid duplicates
+        self.loaded_rule_files: set = set()
+        
         # Track known virtual agents for dynamic topic subscription
         self.known_agents: set = set()
         
         # Track last action commands sent to prevent redundancy
         self.last_action_commands: Dict[str, Dict[str, Any]] = {}  # agent_id -> {action_name: params, timestamp: time}
         self.action_command_lock = threading.Lock()
+        
+        # Extended window logic for agents (15-second timing)
+        self.extended_window_agents: Dict[str, Dict[str, Any]] = {}  # agent_id -> {start_time, duration, last_extend_time}
+        self.extended_window_lock = threading.Lock()
+        self.EXTENDED_WINDOW_DURATION = 15.0  # 15 seconds
         
         # Set up MQTT client with a unique client ID
         mqtt_client_id = f"{self.service_id}-{int(time.time()*1000)}"
@@ -57,6 +65,11 @@ class ContextRuleManager:
         # Start MQTT client loop
         self.mqtt_client.loop_start()
         logger.info(f"[{self.service_id}] Initialized with client ID: {mqtt_client_id} and connected to MQTT broker.")
+        
+        # Load initial rule files if provided
+        if rule_files:
+            for rule_file in rule_files:
+                self.load_rules(rule_file)
 
     def _on_connect(self, client, userdata, flags, rc):
         """Callback when connected to MQTT broker."""
@@ -79,6 +92,12 @@ class ContextRuleManager:
             dashboard_control_topic = "dashboard/control/command"
             result3 = self.mqtt_client.subscribe(dashboard_control_topic, qos=1)
             logger.info(f"[{self.service_id}] Subscribed to dashboard control topic: {dashboard_control_topic} (result: {result3})")
+            
+            # Subscribe to rules management commands
+            # Topic: context/rules/command
+            rules_management_topic = "context/rules/command"
+            result4 = self.mqtt_client.subscribe(rules_management_topic, qos=1)
+            logger.info(f"[{self.service_id}] Subscribed to rules management topic: {rules_management_topic} (result: {result4})")
         else:
             logger.error(f"[{self.service_id}] Failed to connect to MQTT broker. Result code: {rc}")
 
@@ -91,6 +110,12 @@ class ContextRuleManager:
             if msg.topic == "dashboard/control/command":
                 logger.info(f"[{self.service_id}] DEBUG: Processing dashboard control command")
                 self._handle_dashboard_control_command(msg.payload.decode())
+                return
+            
+            # Check if it's a rules management command
+            if msg.topic == "context/rules/command":
+                logger.info(f"[{self.service_id}] DEBUG: Processing rules management command")
+                self._handle_rules_management_command(msg.payload.decode())
                 return
             
             event = MQTTMessage.deserialize(msg.payload.decode())
@@ -301,34 +326,95 @@ class ContextRuleManager:
             logger.error(f"[{self.service_id}] Error handling action report: {e}", exc_info=True)
 
     def _apply_rules_for_agent(self, agent_id: str, current_state: Dict[str, Any], timestamp: Any):
-        """Apply rules for a specific agent immediately when context is updated."""
+        """Apply rules for a specific agent with 15-second extended window logic."""
         try:
             logger.debug(f"[{self.service_id}] Processing rules for agent '{agent_id}' (state updated)")
             logger.debug(f"[{self.service_id}] Current state for '{agent_id}': {json.dumps(current_state, indent=2)}")
             
-            state_after_rules = self.evaluate_rules(agent_id, current_state)
-            logger.info(f"[{self.service_id}] State after rules for agent '{agent_id}': {json.dumps(state_after_rules, indent=2) if state_after_rules else 'No change'}")
-
-            if state_after_rules is not None:
-                # Only publish if the state actually changed as a result of the rules
-                if state_after_rules != current_state:
-                    # Determine what actions need to be taken based on state changes
-                    actions_to_execute = self._determine_actions_from_state_change(current_state, state_after_rules)
-                    
-                    if actions_to_execute:
-                        logger.info(f"[{self.service_id}] Rules triggered {len(actions_to_execute)} action(s) for agent '{agent_id}'")
-                        
-                        for action in actions_to_execute:
-                            self._send_action_command(agent_id, action["actionName"], action.get("parameters"))
-                    else:
-                        logger.debug(f"[{self.service_id}] Rules processed for agent '{agent_id}' but no actions determined")
-                else:
-                    logger.debug(f"[{self.service_id}] Rules evaluated for agent '{agent_id}', but resulting state is IDENTICAL to original")
+            # Evaluate rules to get the raw decision
+            raw_rule_decision = self.evaluate_rules(agent_id, current_state)
+            
+            if raw_rule_decision is None:
+                logger.debug(f"[{self.service_id}] No rules triggered for agent '{agent_id}'")
+                return
+            
+            # Extract power decision from rules
+            raw_power_decision = raw_rule_decision.get("power")
+            current_power_state = current_state.get("power", "off")
+            
+            logger.info(f"[{self.service_id}] Raw rule decision for '{agent_id}': power={raw_power_decision}")
+            
+            # Apply extended window logic
+            final_decision = self._apply_extended_window_logic(agent_id, current_power_state, raw_power_decision)
+            
+            if final_decision != current_power_state:
+                logger.info(f"[{self.service_id}] Final decision for '{agent_id}': {current_power_state} → {final_decision}")
+                
+                # Send action command based on final decision
+                if final_decision == "on":
+                    self._send_action_command(agent_id, "turn_on")
+                elif final_decision == "off":
+                    self._send_action_command(agent_id, "turn_off")
             else:
-                logger.debug(f"[{self.service_id}] No applicable rules resulted in a state change for agent '{agent_id}'")
+                logger.debug(f"[{self.service_id}] No state change needed for agent '{agent_id}' (already {current_power_state})")
                 
         except Exception as e:
             logger.error(f"[{self.service_id}] Error applying rules for agent '{agent_id}': {e}", exc_info=True)
+
+    def _apply_extended_window_logic(self, agent_id: str, current_power: str, raw_rule_decision: str) -> str:
+        """
+        Apply 15-second extended window logic to rule decisions.
+        
+        Logic:
+        - OFF → ON: Start 15s window, return "on"
+        - During 15s window:
+          - Rule says "on": Extend window by 15s, return "on" 
+          - Rule says "off": Continue countdown, return "on"
+        - After 15s expires: Allow "off", return "off"
+        """
+        current_time = time.time()
+        
+        with self.extended_window_lock:
+            window_info = self.extended_window_agents.get(agent_id)
+            
+            # Case 1: OFF → ON (start new window)
+            if current_power == "off" and raw_rule_decision == "on":
+                self.extended_window_agents[agent_id] = {
+                    "start_time": current_time,
+                    "duration": self.EXTENDED_WINDOW_DURATION,
+                    "last_extend_time": current_time
+                }
+                logger.info(f"[{self.service_id}] Started 15s extended window for '{agent_id}'")
+                return "on"
+            
+            # Case 2: No active window, follow raw decision
+            if not window_info:
+                return raw_rule_decision
+            
+            # Case 3: Active window - check if expired
+            window_start = window_info["start_time"]
+            last_extend = window_info["last_extend_time"]
+            time_since_last_extend = current_time - last_extend
+            
+            # Window expired?
+            if time_since_last_extend >= self.EXTENDED_WINDOW_DURATION:
+                # Window expired - remove it and allow raw decision
+                del self.extended_window_agents[agent_id]
+                logger.info(f"[{self.service_id}] Extended window expired for '{agent_id}' - allowing raw decision: {raw_rule_decision}")
+                return raw_rule_decision
+            
+            # Case 4: Active window, rule says "on" - extend window
+            if raw_rule_decision == "on":
+                self.extended_window_agents[agent_id]["last_extend_time"] = current_time
+                remaining_time = self.EXTENDED_WINDOW_DURATION - time_since_last_extend
+                logger.info(f"[{self.service_id}] Extended window for '{agent_id}' (was {remaining_time:.1f}s remaining, now reset to 15s)")
+                return "on"
+            
+            # Case 5: Active window, rule says "off" - continue countdown, stay on
+            else:
+                remaining_time = self.EXTENDED_WINDOW_DURATION - time_since_last_extend
+                logger.info(f"[{self.service_id}] Rule says 'off' for '{agent_id}', but in extended window ({remaining_time:.1f}s remaining) - staying on")
+                return "on"
 
     def _determine_actions_from_state_change(self, old_state: Dict[str, Any], new_state: Dict[str, Any]) -> list:
         """Determine what action commands to send based on state changes."""
@@ -615,7 +701,13 @@ class ContextRuleManager:
     def load_rules(self, rdf_file_path: str) -> None:
         """Load rules from an RDF file."""
         try:
+            # Check if file already loaded to avoid duplicates
+            if rdf_file_path in self.loaded_rule_files:
+                logger.info(f"[{self.service_id}] Rules file {rdf_file_path} already loaded, skipping")
+                return
+            
             self.rules_graph.parse(rdf_file_path, format="turtle")
+            self.loaded_rule_files.add(rdf_file_path)
             logger.info(f"[{self.service_id}] Successfully loaded rules from {rdf_file_path}")
             
             # Log loaded rule details for verification
@@ -629,12 +721,127 @@ class ContextRuleManager:
             }
             GROUP BY ?rule_uri ?agent_literal ?action_uri
             """
-            logger.debug(f"[{self.service_id}] Verifying loaded rules:")
+            logger.debug(f"[{self.service_id}] Verifying loaded rules from {rdf_file_path}:")
             for r_uri, ag_lit, conds_str, act_uri in self.rules_graph.query(rules_query):
                 logger.debug(f"[{self.service_id}]   Rule: {r_uri}, Agent: {ag_lit}, Conditions: [{conds_str if conds_str else 'None'}], Action: {act_uri if act_uri else 'None'}")
 
         except Exception as e:
             logger.error(f"[{self.service_id}] Failed to load rules from {rdf_file_path}: {e}", exc_info=True)
+
+    def load_rules_from_list(self, rule_file_paths: List[str]) -> Dict[str, bool]:
+        """Load multiple rule files and return success status for each."""
+        results = {}
+        for rule_file in rule_file_paths:
+            try:
+                self.load_rules(rule_file)
+                results[rule_file] = True
+            except Exception as e:
+                logger.error(f"[{self.service_id}] Failed to load rule file {rule_file}: {e}")
+                results[rule_file] = False
+        return results
+
+    def get_loaded_rule_files(self) -> List[str]:
+        """Get list of currently loaded rule files."""
+        return list(self.loaded_rule_files)
+
+    def clear_rules(self) -> None:
+        """Clear all loaded rules."""
+        self.rules_graph = Graph()
+        self.rules_graph.bind("lapras", self.lapras)
+        self.loaded_rule_files.clear()
+        logger.info(f"[{self.service_id}] All rules cleared")
+
+    def _handle_rules_management_command(self, message_payload: str):
+        """Handle rules management commands via MQTT."""
+        try:
+            event = MQTTMessage.deserialize(message_payload)
+            
+            if event.event.type != "rulesCommand":
+                logger.error(f"[{self.service_id}] Expected rulesCommand event type, got: {event.event.type}")
+                return
+            
+            logger.info(f"[{self.service_id}] Received rules management command: {event.event.id}")
+            
+            # Extract command details from payload
+            command_action = event.payload.get('action')  # "load", "unload", "reload", "list"
+            rule_files = event.payload.get('rule_files', [])  # list of rule file paths
+            command_id = event.event.id
+            
+            success = False
+            message = ""
+            
+            if command_action == "load":
+                try:
+                    loaded_files = []
+                    for rule_file in rule_files:
+                        self.load_rules(rule_file)
+                        loaded_files.append(rule_file)
+                    success = True
+                    message = f"Successfully loaded {len(loaded_files)} rule files: {loaded_files}"
+                except Exception as e:
+                    message = f"Error loading rules: {str(e)}"
+                    
+            elif command_action == "reload":
+                try:
+                    # Clear existing rules
+                    self.rules_graph = Graph()
+                    self.rules_graph.bind("lapras", self.lapras)
+                    self.loaded_rule_files.clear()
+                    
+                    # Reload specified files
+                    loaded_files = []
+                    for rule_file in rule_files:
+                        self.load_rules(rule_file)
+                        loaded_files.append(rule_file)
+                    success = True
+                    message = f"Successfully reloaded {len(loaded_files)} rule files: {loaded_files}"
+                except Exception as e:
+                    message = f"Error reloading rules: {str(e)}"
+                    
+            elif command_action == "list":
+                success = True
+                message = f"Currently loaded rule files: {list(self.loaded_rule_files)}"
+                
+            else:
+                message = f"Unknown rules command action: {command_action}"
+            
+            # Publish result back
+            self._publish_rules_command_result(command_id, success, message, command_action)
+            
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error processing rules management command: {e}", exc_info=True)
+            self._publish_rules_command_result("unknown", False, f"Error: {str(e)}", "unknown")
+
+    def _publish_rules_command_result(self, command_id: str, success: bool, message: str, action: str):
+        """Publish rules command result back via MQTT using Event structure."""
+        try:
+            result_event = Event(
+                event=EventMetadata(
+                    id="",  # Auto-generated
+                    timestamp="",  # Auto-generated  
+                    type="rulesCommandResult"
+                ),
+                source=EntityInfo(
+                    entityType="contextManager",
+                    entityId="CM-MainController"
+                ),
+                payload={
+                    "command_id": command_id,
+                    "success": success,
+                    "message": message,
+                    "action": action,
+                    "loaded_files": list(self.loaded_rule_files)
+                }
+            )
+            
+            result_topic = "context/rules/result"
+            result_message = MQTTMessage.serialize(result_event)
+            self.mqtt_client.publish(result_topic, result_message, qos=1)
+            
+            logger.info(f"[{self.service_id}] Published rules command result: {command_id} - {success}")
+            
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error publishing rules command result: {e}")
 
     # Context management methods
     def get_agent_state(self, agent_id: str) -> Optional[Dict[str, Any]]:

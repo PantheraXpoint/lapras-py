@@ -1,5 +1,5 @@
 from dataclasses import dataclass, asdict
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, List
 import logging
 import threading
 from queue import Queue, Empty
@@ -43,7 +43,7 @@ class EventMetadata:
         if not self.id:
             self.id = str(uuid.uuid4())[:8]
         if not self.timestamp:
-            self.timestamp = time.gmtime()
+            self.timestamp = list(time.gmtime())
 
 @dataclass
 class EntityInfo:
@@ -208,6 +208,54 @@ class EventFactory:
                 message=message,
                 new_state=new_state
             ))
+        )
+
+    @staticmethod
+    def create_rules_command_event(
+        action: str,  # "load", "reload", "list", "clear"
+        rule_files: Optional[List[str]] = None,
+        source_entity_id: str = "Dashboard"
+    ) -> Event:
+        """Create a rulesCommand event for managing rules dynamically."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="rulesCommand"
+            ),
+            source=EntityInfo(
+                entityType="dashboard",
+                entityId=source_entity_id
+            ),
+            payload={
+                "action": action,
+                "rule_files": rule_files or []
+            }
+        )
+
+    @staticmethod
+    def create_sensor_config_event(
+        target_agent_id: str,
+        action: str,  # "configure", "add", "remove", "list"
+        sensor_config: Optional[Dict[str, List[str]]] = None,
+        source_entity_id: str = "Dashboard"
+    ) -> Event:
+        """Create a sensorConfig event for dynamic sensor management."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="sensorConfig"
+            ),
+            source=EntityInfo(
+                entityType="dashboard",
+                entityId=source_entity_id
+            ),
+            payload={
+                "target_agent_id": target_agent_id,
+                "action": action,
+                "sensor_config": sensor_config or {}
+            }
         )
 
 class MQTTMessage:

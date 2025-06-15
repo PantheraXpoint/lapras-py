@@ -17,167 +17,354 @@ from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager, Sen
 logger = logging.getLogger(__name__)
 
 class LightHueAgent(VirtualAgent):
-    def __init__(self, agent_id: str = "none", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, decision_window: int = 0.5):
+    def __init__(self, agent_id: str = "hue_light", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, 
+                 sensor_config: dict = None, transmission_interval: float = 0.5):
         super().__init__(agent_id, "hue_light", mqtt_broker, mqtt_port)
         
         logger.info(f"[{self.agent_id}] LightHueAgent initialized")
 
-        # with self.state_lock:
+        # Default sensor configuration if none provided
+        if sensor_config is None:
+            sensor_config = {
+                "infrared": ["infrared_1", "infrared_2"]  # Default to infrared sensors
+            }
+        
+        self.sensor_config = sensor_config
+        self.supported_sensor_types = ["infrared", "motion", "activity"]
+
+        # Transmission rate control
+        self.transmission_interval = transmission_interval  # seconds between transmissions
+        self.last_transmission_time = 0.0
+        self.pending_state_update = False
+        
+        # Initialize local state - no timing logic
         self.local_state.update({
             "power": "on",
             "proximity_status": "unknown",
-            "sensor_states": {},  # Store sensor states with timestamps
-            "last_decision_time": time.time()  # Initialize to current time instead of 0.0
+            "motion_status": "unknown", 
+            "activity_status": "unknown",
+            "activity_detected": False,
+            # Remove sensor_states - sensors section already contains all this data
+            # "sensor_states": {},  # Store sensor states with timestamps
         })
         
-        # Add time window tracking for proximity states
-        self.proximity_window = decision_window
-        
-        # Track last processing time for each sensor
-        self.last_sensor_processing = {}
-
         self.sensor_data = defaultdict(dict)  # Store sensor data with sensor_id as key
         
-        # self.add_sensor_agent("infrared_1", "infrared_2", "infrared_3")
-        self.add_sensor_agent("infrared_1")
-        self.add_sensor_agent("infrared_2")
-        # self.add_sensor_agent("infrared_3")
-        # self.add_sensor_agent("infrared_4")
+        # Dynamically add sensors based on configuration
+        self._configure_sensors()
         
-        logger.info(f"[{self.agent_id}] LightHueAgent initialization completed")
+        # Subscribe to sensor configuration commands
+        self._setup_sensor_config_subscription()
+        
+        logger.info(f"[{self.agent_id}] LightHueAgent initialization completed with sensors: {sensor_config} and transmission interval: {transmission_interval}s")
+    
+    def _configure_sensors(self):
+        """Configure sensors based on the sensor_config."""
+        total_sensors = 0
+        for sensor_type, sensor_ids in self.sensor_config.items():
+            if sensor_type not in self.supported_sensor_types:
+                logger.warning(f"[{self.agent_id}] Unsupported sensor type: {sensor_type}")
+                continue
+                
+            for sensor_id in sensor_ids:
+                self.add_sensor_agent(sensor_id)
+                total_sensors += 1
+                logger.info(f"[{self.agent_id}] Added {sensor_type} sensor: {sensor_id}")
+        
+        logger.info(f"[{self.agent_id}] Configured {total_sensors} sensors across {len(self.sensor_config)} sensor types")
+    
+    def _setup_sensor_config_subscription(self):
+        """Set up MQTT subscription for sensor configuration commands."""
+        try:
+            config_topic = f"agent/{self.agent_id}/sensorConfig"
+            self.mqtt_client.subscribe(config_topic)
+            self.mqtt_client.message_callback_add(config_topic, self._handle_sensor_config_command)
+            logger.info(f"[{self.agent_id}] Subscribed to sensor configuration commands on: {config_topic}")
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error setting up sensor config subscription: {e}")
+    
+    def _handle_sensor_config_command(self, client, userdata, message):
+        """Handle sensor configuration commands received via MQTT."""
+        try:
+            import json
+            from lapras_middleware.event import MQTTMessage
+            
+            # Deserialize the event
+            event = MQTTMessage.deserialize(message.payload.decode())
+            payload = event.payload
+            
+            if payload.get("target_agent_id") != self.agent_id:
+                return  # Not for this agent
+            
+            action = payload.get("action")
+            sensor_config = payload.get("sensor_config", {})
+            
+            logger.info(f"[{self.agent_id}] Received sensor config command: {action}")
+            
+            if action == "configure":
+                self._reconfigure_sensors(sensor_config)
+            elif action == "add":
+                self._add_sensors(sensor_config)
+            elif action == "remove":
+                self._remove_sensors(sensor_config)
+            elif action == "list":
+                self._list_sensors()
+            else:
+                logger.warning(f"[{self.agent_id}] Unknown sensor config action: {action}")
+                
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error handling sensor config command: {e}")
+    
+    def _reconfigure_sensors(self, new_sensor_config: dict):
+        """Reconfigure all sensors with new configuration."""
+        try:
+            # Remove all current sensor subscriptions
+            self._remove_all_sensors()
+            
+            # Update configuration
+            self.sensor_config = new_sensor_config
+            
+            # Add new sensors
+            self._configure_sensors()
+            
+            logger.info(f"[{self.agent_id}] Sensors reconfigured: {new_sensor_config}")
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error reconfiguring sensors: {e}")
+    
+    def _add_sensors(self, sensor_config: dict):
+        """Add new sensors to existing configuration."""
+        try:
+            for sensor_type, sensor_ids in sensor_config.items():
+                if sensor_type not in self.supported_sensor_types:
+                    logger.warning(f"[{self.agent_id}] Unsupported sensor type: {sensor_type}")
+                    continue
+                
+                # Add to existing config or create new entry
+                if sensor_type not in self.sensor_config:
+                    self.sensor_config[sensor_type] = []
+                
+                for sensor_id in sensor_ids:
+                    if sensor_id not in self.sensor_config[sensor_type]:
+                        self.sensor_config[sensor_type].append(sensor_id)
+                        self.add_sensor_agent(sensor_id)
+                        logger.info(f"[{self.agent_id}] Added {sensor_type} sensor: {sensor_id}")
+                    else:
+                        logger.info(f"[{self.agent_id}] Sensor {sensor_id} already exists")
+            
+            logger.info(f"[{self.agent_id}] Sensors added. Current config: {self.sensor_config}")
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error adding sensors: {e}")
+    
+    def _remove_sensors(self, sensor_config: dict):
+        """Remove sensors from configuration."""
+        try:
+            for sensor_type, sensor_ids in sensor_config.items():
+                if sensor_type in self.sensor_config:
+                    for sensor_id in sensor_ids:
+                        if sensor_id in self.sensor_config[sensor_type]:
+                            self.sensor_config[sensor_type].remove(sensor_id)
+                            # Note: We don't remove MQTT subscription as it might be used by other agents
+                            logger.info(f"[{self.agent_id}] Removed {sensor_type} sensor: {sensor_id}")
+                        else:
+                            logger.warning(f"[{self.agent_id}] Sensor {sensor_id} not found in {sensor_type}")
+                    
+                    # Remove empty sensor types
+                    if not self.sensor_config[sensor_type]:
+                        del self.sensor_config[sensor_type]
+            
+            logger.info(f"[{self.agent_id}] Sensors removed. Current config: {self.sensor_config}")
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error removing sensors: {e}")
+    
+    def _remove_all_sensors(self):
+        """Remove all sensor subscriptions."""
+        try:
+            # Clear sensor configuration
+            self.sensor_config = {}
+            
+            # Clear sensor data
+            with self.state_lock:
+                self.sensor_data.clear()
+                # Remove sensor_states clearing since we no longer use it
+                # self.local_state["sensor_states"] = {}
+            
+            logger.info(f"[{self.agent_id}] All sensors removed")
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error removing all sensors: {e}")
+    
+    def _list_sensors(self):
+        """List current sensor configuration."""
+        try:
+            total_sensors = sum(len(sensors) for sensors in self.sensor_config.values())
+            logger.info(f"[{self.agent_id}] Current sensor configuration ({total_sensors} total sensors):")
+            for sensor_type, sensor_ids in self.sensor_config.items():
+                logger.info(f"[{self.agent_id}]   {sensor_type}: {sensor_ids}")
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error listing sensors: {e}")
     
     def _process_sensor_update(self, sensor_payload: SensorPayload, sensor_id: str):
-        """Process sensor data updates from managed sensors."""
+        """Process all sensor data updates immediately - no timing logic."""
+        current_time = time.time()
+        logger.info(f"[{self.agent_id}] Processing sensor update: {sensor_id}, type: {sensor_payload.sensor_type}, value: {sensor_payload.value}")
+        
+        # Process every sensor update immediately - let context manager handle timing decisions
         if sensor_payload.sensor_type == "infrared":
-            current_time = time.time()
-            logger.info(f"process sensor update: {sensor_id}, {sensor_payload.value}")
-            
-            # Check if we should process this message based on the decision window
-            last_processed = self.last_sensor_processing.get(sensor_id, 0)
-            current_processing_window = self.proximity_window  # Always use base window for processing
-            if current_time - last_processed < current_processing_window:
-                logger.info(f"[{self.agent_id}] Skipping message from {sensor_id} - too soon after last processing")
+            self._process_infrared_sensor(sensor_payload, sensor_id, current_time)
+        elif sensor_payload.sensor_type == "motion":
+            self._process_motion_sensor(sensor_payload, sensor_id, current_time)
+        elif sensor_payload.sensor_type == "activity":
+            self._process_activity_sensor(sensor_payload, sensor_id, current_time)
+        else:
+            logger.warning(f"[{self.agent_id}] Unsupported sensor type: {sensor_payload.sensor_type}")
+    
+    def _process_infrared_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
+        """Process infrared sensor updates."""
+        with self.state_lock:
+            # Update sensor data
+            self.sensor_data[sensor_id] = {
+                "sensor_type": sensor_payload.sensor_type,
+                "value": sensor_payload.value,
+                "unit": sensor_payload.unit,
+                "metadata": sensor_payload.metadata,
+            }
+
+            if not sensor_payload.metadata or "proximity_status" not in sensor_payload.metadata:
+                logger.warning(f"[{self.agent_id}] No proximity_status in infrared sensor metadata")
                 return
                 
-            # Update last processed time for this sensor
-            self.last_sensor_processing[sensor_id] = current_time
+            # Update global proximity status
+            proximity_detected = any(
+                sensor_info.get("metadata", {}).get("proximity_status") == "near"
+                for sensor_info in self.sensor_data.values()
+                if sensor_info.get("sensor_type") == "infrared"
+            )
+            new_proximity_status = "near" if proximity_detected else "far"
             
-            # NOTE(YH): this is a hack to avoid race condition
-            with self.state_lock:
-                # Update sensor data
-                self.sensor_data[sensor_id] = {
-                    "sensor_type": sensor_payload.sensor_type,
-                    "value": sensor_payload.value,
-                    "unit": sensor_payload.unit,
-                    "metadata": sensor_payload.metadata,
-                }
+            if self.local_state.get("proximity_status") != new_proximity_status:
+                self.local_state["proximity_status"] = new_proximity_status
+                logger.info(f"[{self.agent_id}] Updated proximity_status to: {new_proximity_status}")
 
-                assert (sensor_payload.metadata is not None), f"[{self.agent_id}] Sensor metadata is None for infrared sensor {sensor_id}"
+            # Update activity_detected field for rules
+            self._update_activity_detected()
+
+            # Rate-limited state publication to context manager
+            self._schedule_transmission()
+    
+    def _process_motion_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
+        """Process motion sensor updates."""
+        with self.state_lock:
+            # Update sensor data
+            self.sensor_data[sensor_id] = {
+                "sensor_type": sensor_payload.sensor_type,
+                "value": sensor_payload.value,
+                "unit": sensor_payload.unit,
+                "metadata": sensor_payload.metadata,
+            }
+
+            if not sensor_payload.metadata or "motion_status" not in sensor_payload.metadata:
+                logger.warning(f"[{self.agent_id}] No motion_status in motion sensor metadata")
+                return
                 
-                # Update proximity status based on infrared sensor
-                if (sensor_payload.metadata is not None) and ("proximity_status" in sensor_payload.metadata):
-                    # Update the sensor's state in local_state
-                    if "sensor_states" not in self.local_state:
-                        self.local_state["sensor_states"] = {}
-                    
-                    self.local_state["sensor_states"][sensor_id] = {
-                        "status": sensor_payload.metadata["proximity_status"],
-                        "timestamp": current_time,
-                        "distance": sensor_payload.value
-                    }
+            # Update global motion status
+            motion_detected = any(
+                sensor_info.get("metadata", {}).get("motion_status") == "motion"
+                for sensor_info in self.sensor_data.values()
+                if sensor_info.get("sensor_type") == "motion"
+            )
+            new_motion_status = "motion" if motion_detected else "no_motion"
+            
+            if self.local_state.get("motion_status") != new_motion_status:
+                self.local_state["motion_status"] = new_motion_status
+                logger.info(f"[{self.agent_id}] Updated motion_status to: {new_motion_status}")
 
-                    logger.info(f"sensor states: {self.local_state.get('sensor_states', {})}, local state: {self.local_state}")
-                    
-                    # Extended window logic
-                    base_window = self.proximity_window
-                    extended_multiplier = 30  # Your N value
-                    
-                    # Collect current sensor states
-                    any_near = False
-                    all_far = True
-                    active_sensors = 0
-                    
-                    for sid, state in self.local_state["sensor_states"].items():
-                        active_sensors += 1
-                        if state["status"] == "near":
-                            any_near = True
-                        elif state["status"] == "far":
-                            pass
-                        else:
-                            all_far = False
-                    
-                    # Process based on current power state
-                    if self.local_state.get("power") == "on":
-                        # Light is ON
-                        if any_near:
-                            # We see near - reset the timer by updating last_decision_time
-                            self.local_state["last_decision_time"] = current_time
-                            new_proximity = "near"
-                            logger.info(f"[{self.agent_id}] Near detected - extending window for {extended_multiplier * base_window}s")
-                            
-                            # Update proximity status if changed
-                            if new_proximity != self.local_state.get("proximity_status"):
-                                self.local_state["proximity_status"] = new_proximity
-                                logger.info(f"[{self.agent_id}] Updated proximity status to: {new_proximity}")
-                                self._trigger_state_publication()
-                            return  # Don't process further, just extend the window
-                        
-                        elif all_far and active_sensors > 0:
-                            # All sensors are far - check if we're still in extended window
-                            time_since_last_near = current_time - self.local_state["last_decision_time"]
-                            extended_window_duration = extended_multiplier * base_window
-                            
-                            if time_since_last_near < extended_window_duration:
-                                # Still in extended window, don't turn off
-                                logger.info(f"[{self.agent_id}] All far but still in extended window ({time_since_last_near:.1f}s/{extended_window_duration}s)")
-                                return  # Don't change anything
-                            else:
-                                # Extended window expired, can turn off
-                                new_proximity = "far"
-                                logger.info(f"[{self.agent_id}] Decision: Turning OFF light (extended window expired, all {active_sensors} sensors far)")
-                                
-                                # Update proximity status and trigger publication
-                                if new_proximity != self.local_state.get("proximity_status"):
-                                    self.local_state["proximity_status"] = new_proximity
-                                    logger.info(f"[{self.agent_id}] Updated proximity status to: {new_proximity}")
-                                    self._trigger_state_publication()
-                                return
-                        else:
-                            # Unknown states, no change
-                            logger.info(f"[{self.agent_id}] Decision: No change (inconclusive sensor states)")
-                            return
-                            
-                    else:
-                        # Light is OFF - use normal logic with base window
-                        if current_time - self.local_state["last_decision_time"] >= base_window:
-                            if any_near:
-                                new_proximity = "near"
-                                logger.info(f"[{self.agent_id}] Decision: Turning ON light (sensor near)")
-                                
-                                # Update last decision time and proximity status
-                                self.local_state["last_decision_time"] = current_time
-                                if new_proximity != self.local_state.get("proximity_status"):
-                                    self.local_state["proximity_status"] = new_proximity
-                                    logger.info(f"[{self.agent_id}] Updated proximity status to: {new_proximity}")
-                                    self._trigger_state_publication()
-                            else:
-                                logger.info(f"[{self.agent_id}] Decision: No change (no near sensors)")
-                        else:
-                            logger.info(f"[{self.agent_id}] Not time to make decision yet (OFF state)")
-                    
-                    # Log the sensor update
-                    # logger.info(f"[{self.agent_id}] Updated from IR sensor: distance={sensor_payload.value}{sensor_payload.unit}, proximity={sensor_payload.metadata['proximity_status']}")
+            # Update activity_detected field for rules
+            self._update_activity_detected()
 
+            # Rate-limited state publication to context manager
+            self._schedule_transmission()
+    
+    def _process_activity_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
+        """Process activity sensor updates."""
+        with self.state_lock:
+            # Update sensor data
+            self.sensor_data[sensor_id] = {
+                "sensor_type": sensor_payload.sensor_type,
+                "value": sensor_payload.value,
+                "unit": sensor_payload.unit,
+                "metadata": sensor_payload.metadata,
+            }
+
+            if not sensor_payload.metadata or "activity_status" not in sensor_payload.metadata:
+                logger.warning(f"[{self.agent_id}] No activity_status in activity sensor metadata")
+                return
+                
+            # Update global activity status
+            activity_detected = any(
+                sensor_info.get("metadata", {}).get("activity_status") == "active"
+                for sensor_info in self.sensor_data.values()
+                if sensor_info.get("sensor_type") == "activity"
+            )
+            new_activity_status = "active" if activity_detected else "inactive"
+            
+            if self.local_state.get("activity_status") != new_activity_status:
+                self.local_state["activity_status"] = new_activity_status
+                logger.info(f"[{self.agent_id}] Updated activity_status to: {new_activity_status}")
+
+            # Update activity_detected field for rules
+            self._update_activity_detected()
+
+            # Rate-limited state publication to context manager
+            self._schedule_transmission()
+    
+    def _update_activity_detected(self):
+        """Update the activity_detected field that rules use for decisions."""
+        # Check if any sensor shows activity
+        activity_detected = (
+            self.local_state.get("proximity_status") == "near" or
+            self.local_state.get("motion_status") == "motion" or
+            self.local_state.get("activity_status") == "active"
+        )
+        
+        old_activity_detected = self.local_state.get("activity_detected", False)
+        if old_activity_detected != activity_detected:
+            self.local_state["activity_detected"] = activity_detected
+            logger.info(f"[{self.agent_id}] Updated activity_detected: {old_activity_detected} → {activity_detected}")
+    
+    def _schedule_transmission(self):
+        """Schedule rate-limited transmission to context manager."""
+        current_time = time.time()
+        
+        # Mark that we have a pending state update
+        self.pending_state_update = True
+        
+        # Check if enough time has passed since last transmission
+        if current_time - self.last_transmission_time >= self.transmission_interval:
+            self._transmit_to_context_manager()
+        # If not enough time has passed, the periodic check will handle it
+    
+    def _transmit_to_context_manager(self):
+        """Actually transmit state to context manager and reset pending flag."""
+        if self.pending_state_update:
+            self._trigger_state_publication()
+            self.last_transmission_time = time.time()
+            self.pending_state_update = False
+            logger.debug(f"[{self.agent_id}] Transmitted state to context manager")
+    
     def perception(self):
         """Internal perception logic - runs continuously."""
-        # This can be used for internal state management or decision making
-        # For now, we'll just log periodically
         current_time = time.time()
+        
+        # Handle rate-limited transmissions
+        if (self.pending_state_update and 
+            current_time - self.last_transmission_time >= self.transmission_interval):
+            self._transmit_to_context_manager()
+        
+        # Periodic state logging
         if not hasattr(self, '_last_perception_log') or current_time - self._last_perception_log > 10:
             with self.state_lock:
                 logger.info(f"[{self.agent_id}] Current state: {self.local_state}")
             self._last_perception_log = current_time
-            
+    
     def _clean_data_for_serialization(self, data):
         """Clean data to ensure it's serializable."""
         if isinstance(data, dict):
@@ -232,12 +419,13 @@ class LightHueAgent(VirtualAgent):
             
             # Prepare data for publishing while we have the lock
             complete_state = self.local_state.copy()
-            for sensor_id_inner, sensor_info in self.sensor_data.items():
-                complete_state[f"{sensor_id_inner}_value"] = sensor_info["value"]
-                complete_state[f"{sensor_id_inner}_unit"] = sensor_info["unit"]
-                if sensor_info["metadata"]:
-                    for key, value in sensor_info["metadata"].items():
-                        complete_state[f"{sensor_id_inner}_{key}"] = value
+            # Remove flattened sensor data duplication - sensors section already contains all this data
+            # for sensor_id_inner, sensor_info in self.sensor_data.items():
+            #     complete_state[f"{sensor_id_inner}_value"] = sensor_info["value"]
+            #     complete_state[f"{sensor_id_inner}_unit"] = sensor_info["unit"]
+            #     if sensor_info["metadata"]:
+            #         for key, value in sensor_info["metadata"].items():
+            #             complete_state[f"{sensor_id_inner}_{key}"] = value
             sensor_data_copy = self.sensor_data.copy()
         
         # logger.info(f"[{self.agent_id}] DEBUG: state_lock released")
@@ -322,20 +510,17 @@ class LightHueAgent(VirtualAgent):
         return ret
 
     def execute_action(self, action_payload: ActionPayload) -> dict:
-        """Execute aircon control actions."""
+        """Execute light control actions - always obey context manager commands immediately."""
         logger.info(f"[{self.agent_id}] Executing action: {action_payload.actionName}")
         
         try:            
             if action_payload.actionName == "turn_on":
                 with self.state_lock:
                     self.local_state["power"] = "on"
-                    # Reset the extended window timer when manually turning on
-                    self.local_state["last_decision_time"] = time.time()
                     new_state = self.local_state.copy()
                     result = self.__turn_on_light()
-                # success = True
-                # message = "Aircon turned on successfully"
-                # logger.info(f"[{self.agent_id}] Aircon turned ON")
+                
+                logger.info(f"[{self.agent_id}] Light turned ON (commanded by context manager)")
                 # Trigger state publication since local_state changed
                 self._trigger_state_publication()
                 
@@ -343,10 +528,9 @@ class LightHueAgent(VirtualAgent):
                 with self.state_lock:
                     self.local_state["power"] = "off"
                     new_state = self.local_state.copy()
-                # success = True
-                # message = "Aircon turned off successfully"
-                # logger.info(f"[{self.agent_id}] Aircon turned OFF")
-                result = self.__turn_off_light()
+                    result = self.__turn_off_light()
+                
+                logger.info(f"[{self.agent_id}] Light turned OFF (commanded by context manager)")
                 # Trigger state publication since local_state changed
                 self._trigger_state_publication()
                     
