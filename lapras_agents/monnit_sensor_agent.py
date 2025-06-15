@@ -53,6 +53,10 @@ class MonnitSensorAgent(SensorAgent, ABC):
         self.sensors_ready = threading.Event()
         self.reading_interval = 1.0  # Default 1 seconds for Monnit sensors
         
+        # Add mapping from sensor_id to friendly_id for consistent naming
+        self.sensor_id_mapping: Dict[int, str] = {}
+        self.friendly_id_counter = 0
+        
         # Initialize parent class with a temporary sensor_id (will be overridden)
         super().__init__(f"monnit_{sensor_type}", sensor_type, virtual_agent_id, mqtt_broker, mqtt_port)
         
@@ -213,9 +217,14 @@ class MonnitSensorAgent(SensorAgent, ABC):
                         value, unit, metadata = self.process_sensor_reading(result, sensor_name, sensor_id)
                         
                         if value is not None:
+                            # Create a user-friendly sensor ID from the sensor name
+                            # Convert "M01|MonnitMotionSensorAgent|712680" -> "motion_1" 
+                            # Convert "S1B|MonnitActivitySensorAgent|505717" -> "activity_1"
+                            friendly_sensor_id = self._create_friendly_sensor_id(sensor_name, sensor_id)
+                            
                             # Create readSensor event for this specific sensor
                             event = EventFactory.create_sensor_event(
-                                sensor_id=f"{self.monnit_sensor_type}_{sensor_id}",
+                                sensor_id=friendly_sensor_id,
                                 sensor_type=self.sensor_type,
                                 value=value,
                                 unit=unit,
@@ -223,13 +232,80 @@ class MonnitSensorAgent(SensorAgent, ABC):
                             )
                             
                             # Publish to MQTT using the broadcast topic pattern for this specific sensor
-                            topic = TopicManager.sensor_broadcast(f"{self.monnit_sensor_type}_{sensor_id}")
+                            topic = TopicManager.sensor_broadcast(friendly_sensor_id)
                             message = MQTTMessage.serialize(event)
                             self.mqtt_client.publish(topic, message, qos=1)
-                            logger.info(f"[{self.agent_id}] Published {sensor_name} reading #{self.reading_count}: {value} {unit} to topic: {topic}")
+                            logger.info(f"[{self.agent_id}] Published {sensor_name} ({friendly_sensor_id}) reading #{self.reading_count}: {value} {unit} to topic: {topic}")
                     
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error reading/publishing sensor data: {e}")
+    
+    def _create_friendly_sensor_id(self, sensor_name: str, sensor_id: int) -> str:
+        """Create a consistent user-friendly sensor ID that doesn't change between readings."""
+        try:
+            # Check if we already have a friendly ID for this sensor_id
+            if sensor_id in self.sensor_id_mapping:
+                return self.sensor_id_mapping[sensor_id]
+            
+            # Create a new friendly ID for this sensor (only happens once per sensor)
+            self.friendly_id_counter += 1
+            
+            # Create simple sequential IDs that match dashboard agent expectations
+            if self.monnit_sensor_type == "temperature":
+                friendly_id = f"temperature_{self.friendly_id_counter}"
+            elif self.monnit_sensor_type == "light":
+                friendly_id = f"light_{self.friendly_id_counter}"
+            elif self.monnit_sensor_type == "motion":
+                # For motion sensors, try to extract number from name for consistency
+                if "|" in sensor_name:
+                    name_part = sensor_name.split("|")[0].strip()
+                    if name_part.startswith("M") and len(name_part) >= 2:
+                        number = name_part[1:]
+                        if number.isdigit():
+                            friendly_id = f"motion_{number}"
+                        else:
+                            friendly_id = f"motion_{name_part.lower()}"
+                    else:
+                        friendly_id = f"motion_{self.friendly_id_counter}"
+                else:
+                    friendly_id = f"motion_{self.friendly_id_counter}"
+            elif self.monnit_sensor_type == "activity":
+                # For activity sensors, extract S1B, S2A style names
+                if "|" in sensor_name:
+                    name_part = sensor_name.split("|")[0].strip()
+                    if name_part.startswith("S"):
+                        friendly_id = f"activity_{name_part.lower()}"
+                    else:
+                        friendly_id = f"activity_{self.friendly_id_counter}"
+                else:
+                    friendly_id = f"activity_{self.friendly_id_counter}"
+            elif self.monnit_sensor_type == "door":
+                # For door sensors, extract D01 style names
+                if "|" in sensor_name:
+                    name_part = sensor_name.split("|")[0].strip()
+                    if name_part.startswith("D") and len(name_part) >= 2:
+                        number = name_part[1:]
+                        if number.isdigit():
+                            friendly_id = f"door_{number}"
+                        else:
+                            friendly_id = f"door_{self.friendly_id_counter}"
+                    else:
+                        friendly_id = f"door_{self.friendly_id_counter}"
+                else:
+                    friendly_id = f"door_{self.friendly_id_counter}"
+            else:
+                # Default fallback for any sensor type
+                friendly_id = f"{self.monnit_sensor_type}_{self.friendly_id_counter}"
+            
+            # Store the mapping so this sensor always gets the same friendly ID
+            self.sensor_id_mapping[sensor_id] = friendly_id
+            logger.info(f"[{self.agent_id}] Mapped sensor {sensor_id} ({sensor_name}) -> {friendly_id}")
+            
+            return friendly_id
+            
+        except Exception as e:
+            logger.warning(f"[{self.agent_id}] Error creating friendly sensor ID for {sensor_name}: {e}")
+            return f"{self.monnit_sensor_type}_{sensor_id}"
     
     def read_sensor(self) -> tuple[Any, Optional[str], Optional[Dict[str, Any]]]:
         """Read all Monnit sensors and return combined data."""
@@ -257,7 +333,10 @@ class MonnitSensorAgent(SensorAgent, ABC):
                     value, unit, metadata = self.process_sensor_reading(result, sensor_name, sensor_id)
                     
                     if value is not None:
-                        all_readings[f"sensor_{sensor_id}"] = {
+                        # Create a user-friendly sensor ID
+                        friendly_sensor_id = self._create_friendly_sensor_id(sensor_name, sensor_id)
+                        
+                        all_readings[friendly_sensor_id] = {
                             "value": value,
                             "unit": unit,
                             "metadata": metadata,
@@ -266,14 +345,16 @@ class MonnitSensorAgent(SensorAgent, ABC):
                         any_success = True
                     else:
                         # Track failed processing
-                        failed_readings[f"sensor_{sensor_id}"] = {
+                        friendly_sensor_id = self._create_friendly_sensor_id(sensor_name, sensor_id)
+                        failed_readings[friendly_sensor_id] = {
                             "name": sensor_name,
                             "reason": "processing_failed",
                             "raw_reading": result.get('CurrentReading', 'N/A')
                         }
                 else:
                     # Track failed API calls
-                    failed_readings[f"sensor_{sensor_id}"] = {
+                    friendly_sensor_id = self._create_friendly_sensor_id(sensor_name, sensor_id)
+                    failed_readings[friendly_sensor_id] = {
                         "name": sensor_name,
                         "reason": "api_failed",
                         "raw_reading": "N/A"
