@@ -12,9 +12,9 @@ from lapras_agents.infrared_sensor_agent import InfraredSensorAgent
 
 def main():
     # Set up logging
-    parser = argparse.ArgumentParser(description='Start the infrared sensor agent for 4 consecutive channels')
+    parser = argparse.ArgumentParser(description='Start the infrared sensor agent with dynamic channel discovery')
     parser.add_argument('--channel', type=int, default=1, 
-                       help='Starting channel number (will use this channel + 1, + 2, and + 3 for 4 sensors total)')
+                       help='Starting channel number (used as a hint for channel discovery)')
     parser.add_argument('--sensor_id', type=str, default="infrared", 
                        help='Sensor ID for the multi-channel infrared sensor')
     parser.add_argument('--virtual_agent_id', type=str, default="any", 
@@ -27,10 +27,9 @@ def main():
     )
     logger = logging.getLogger(__name__)
     
-    # Calculate the 4 channels that will be used
-    channels = [args.channel, args.channel + 1, args.channel + 2, args.channel + 3]
-    logger.info(f"[INFRARED_SENSOR] Starting infrared sensor agent for channels: {channels}")
+    logger.info(f"[INFRARED_SENSOR] Starting infrared sensor agent with channel hint: {args.channel}")
     logger.info(f"[INFRARED_SENSOR] Note: Sensor will broadcast to ALL virtual agents, regardless of virtual_agent_id setting")
+    
     agent = None
     try:
         # Initialize infrared sensor agent
@@ -39,7 +38,6 @@ def main():
             virtual_agent_id=args.virtual_agent_id,
             channel=args.channel
         )
-        logger.info(f"[INFRARED_SENSOR] Infrared sensor agent initialized for channels {channels}")
         
         # Log sensor readings periodically for debugging
         last_log_time = 0
@@ -93,9 +91,12 @@ def main():
         import traceback
         logger.error(f"[INFRARED_SENSOR] Traceback: {traceback.format_exc()}")
     finally:
-        if 'agent' in locals():
+        if agent is not None:
             logger.info("[INFRARED_SENSOR] Stopping agent...")
-            agent.stop()
+            try:
+                agent.stop()
+            except Exception as e:
+                logger.error(f"[INFRARED_SENSOR] Error stopping agent: {e}")
         logger.info("[INFRARED_SENSOR] Infrared sensor agent stopped")
 
 if __name__ == "__main__":

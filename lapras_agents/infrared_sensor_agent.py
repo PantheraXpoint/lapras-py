@@ -5,6 +5,8 @@ import threading
 from Phidget22.PhidgetException import PhidgetException, ErrorCode
 from Phidget22.Devices.VoltageRatioInput import VoltageRatioInput
 from Phidget22.VoltageRatioSensorType import VoltageRatioSensorType
+from Phidget22.Devices.Manager import Manager
+from Phidget22.Phidget import Phidget
 
 import sys
 import os
@@ -16,7 +18,7 @@ from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager
 logger = logging.getLogger(__name__)
 
 class InfraredSensorAgent(SensorAgent):
-    """Infrared distance sensor agent using Phidget sensor with 5 channels."""
+    """Infrared distance sensor agent using Phidget sensor with multiple channels."""
 
     def __init__(self, sensor_id: str = "infrared", virtual_agent_id: str = "aircon", channel: int = 1,
                  mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
@@ -24,17 +26,10 @@ class InfraredSensorAgent(SensorAgent):
         # Thread-safe initialization flag
         self.hardware_ready = threading.Event()  # Starts as "not set"
         
-        # Phidget sensors for 4 channels
+        # Phidget sensors for all channels
         self.ir_sensors: Dict[int, Optional[VoltageRatioInput]] = {}
         self.sensor_initialized: Dict[int, bool] = {}
-        self.channels = [channel, channel + 1, channel + 2, channel + 3]
-        # self.channels = [channel, channel + 1]
-        
-        # Create sensor IDs for each channel (infrared_1, infrared_2, infrared_3, infrared_4)
-        self.sensor_ids = [f"{sensor_id}_{i+1}" for i in range(len(self.channels))]
-        
-        # Create a mapping of channels to sensor IDs
-        self.channel_to_sensor_id = dict(zip(self.channels, self.sensor_ids))
+        self.channels = []  # Will be populated during initialization
         
         # Sensor configuration (Sharp 2Y0A02 - 20-150cm)
         self.SENSOR_MODEL_NAME = "Sharp 2Y0A02 (20-150cm)"
@@ -44,8 +39,8 @@ class InfraredSensorAgent(SensorAgent):
         self.FORMULA_VALID_SV_MAX = 490.0
         self.K_DISTANCE = 9462.0
         self.SV_OFFSET = 16.92
-        self.PROXIMITY_THRESHOLD_CM = 120.0
-
+        self.PROXIMITY_THRESHOLD_CM = 149.0
+        
         # Device parameters
         self.DEVICE_SERIAL_NUMBER = 455869  # run this command to see the serial number "phidget22admin -d"
         self.TARGET_CHANNEL = channel
@@ -53,6 +48,103 @@ class InfraredSensorAgent(SensorAgent):
 
         # Rate limiting for warnings per channel
         self._last_warn_times: Dict[int, Dict[str, float]] = {}
+
+        # Initialize the base SensorAgent class with the sensor ID
+        super().__init__(sensor_id, "infrared", virtual_agent_id, mqtt_broker, mqtt_port)
+
+        self.set_reading_interval(1.0)
+
+        # Initialize sensor hardware after everything is set up
+        # This will set self.hardware_ready when complete
+        self.start_sensor()
+
+    def discover_channels(self) -> List[int]:
+        """Actively probe channels 0-7 to find available channels on the Phidget device."""
+        logger.info(f"[{self.agent_id}] Probing channels 0-7 for device {self.DEVICE_SERIAL_NUMBER}...")
+        available_channels = []
+        
+        # First try to get the device info to verify it exists
+        try:
+            manager = Manager()
+            manager.open()
+            devices = manager.getAttachedDevices()
+            device_found = False
+            for device in devices:
+                if device.getDeviceSerialNumber() == self.DEVICE_SERIAL_NUMBER:
+                    device_found = True
+                    break
+            manager.close()
+            
+            if not device_found:
+                logger.error(f"[{self.agent_id}] Device with serial number {self.DEVICE_SERIAL_NUMBER} not found")
+                return []
+                
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error checking device existence: {str(e)}")
+            # Continue with channel probing even if device check fails
+            logger.info(f"[{self.agent_id}] Continuing with channel probing despite device check error")
+
+        # Now probe each channel
+        for ch in range(8):  # Most Phidget boards have up to 8 channels
+            sensor = None
+            try:
+                sensor = VoltageRatioInput()
+                sensor.setDeviceSerialNumber(self.DEVICE_SERIAL_NUMBER)
+                sensor.setChannel(ch)
+                sensor.setIsHubPortDevice(False)
+                
+                # Try to open with a shorter timeout
+                sensor.openWaitForAttachment(1000)  # 1 second timeout per channel
+                
+                if sensor.getAttached():
+                    # Verify we can actually read from the sensor
+                    try:
+                        # Try to get a reading to verify the sensor is working
+                        sensor.getVoltageRatio()
+                        available_channels.append(ch)
+                        logger.info(f"[{self.agent_id}] Channel {ch} attached and verified working.")
+                    except PhidgetException as e:
+                        logger.warning(f"[{self.agent_id}] Channel {ch} attached but failed to read: {e.code} - {e.details}")
+                else:
+                    logger.debug(f"[{self.agent_id}] Channel {ch} not attached")
+                    
+            except PhidgetException as e:
+                if e.code != ErrorCode.EPHIDGET_TIMEOUT:
+                    logger.warning(f"[{self.agent_id}] Channel {ch} error: {e.code} - {e.details}")
+            except Exception as ex:
+                logger.warning(f"[{self.agent_id}] Channel {ch} generic error: {str(ex)}")
+            finally:
+                if sensor:
+                    try:
+                        sensor.close()
+                    except:
+                        pass
+
+        if not available_channels:
+            logger.warning(f"[{self.agent_id}] No active channels found for device {self.DEVICE_SERIAL_NUMBER}")
+        else:
+            logger.info(f"[{self.agent_id}] Discovered {len(available_channels)} active channels: {available_channels}")
+        return available_channels
+
+    def initialize_sensor(self):
+        """Initialize the Phidget infrared sensors for all discovered channels."""
+        # First discover available channels
+        self.channels = self.discover_channels()
+        
+        if not self.channels:
+            logger.error(f"[{self.agent_id}] No channels available for initialization")
+            # Instead of raising an exception, set hardware_ready and return
+            # This allows the agent to continue running even if no sensors are found
+            self.hardware_ready.set()
+            return
+            
+        # Create sensor IDs ONLY for channels that have sensors
+        self.sensor_ids = [f"{self.agent_id}_{i+1}" for i in range(len(self.channels))]
+        
+        # Create a mapping of channels to sensor IDs ONLY for channels with sensors
+        self.channel_to_sensor_id = dict(zip(self.channels, self.sensor_ids))
+        
+        # Initialize warning times for channels with sensors
         for ch in self.channels:
             self.sensor_initialized[ch] = False
             self._last_warn_times[ch] = {
@@ -61,57 +153,6 @@ class InfraredSensorAgent(SensorAgent):
                 'unknown_val': 0
             }
 
-        # Initialize the base SensorAgent class with the first sensor ID
-        # (This is mainly for compatibility with the parent class)
-        super().__init__(self.sensor_ids[0], "infrared", virtual_agent_id, mqtt_broker, mqtt_port)
-        # super().__init__(sensor_id, "infrared", virtual_agent_id, mqtt_broker, mqtt_port)
-
-        self.set_reading_interval(1.0)
-
-        # Initialize sensor hardware after everything is set up
-        # This will set self.hardware_ready when complete
-        self.start_sensor()
-
-        logger.info(f"[{self.agent_id}] InfraredSensorAgent initialized for channels {self.channels} with sensor IDs {self.sensor_ids}")
-
-    def _read_and_publish(self):
-        """Override parent method to publish each channel to its own topic."""
-        try:
-            # Wait for hardware to be ready (max 10 seconds)
-            if not self.hardware_ready.wait(timeout=10.0):
-                logger.warning(f"[{self.agent_id}] Hardware initialization timeout - skipping read")
-                return
-            
-            self.reading_count += 1
-            # Read all channels and publish each one separately
-            for channel in self.channels:
-                value, unit, metadata = self.read_sensor_channel(channel)
-                
-                if value is not None:
-                    sensor_id = self.channel_to_sensor_id[channel]
-                    
-                    # Create readSensor event for this specific channel
-                    # No target field needed - routing handled by MQTT topic
-                    event = EventFactory.create_sensor_event(
-                        sensor_id=sensor_id,
-                        sensor_type=self.sensor_type,
-                        value=value,
-                        unit=unit,
-                        metadata=metadata
-                    )
-                    
-                    # Publish to MQTT using the broadcast topic pattern for this specific sensor ID
-                    topic = TopicManager.sensor_broadcast(sensor_id)
-                    message = MQTTMessage.serialize(event)
-                    self.mqtt_client.publish(topic, message, qos=1)
-                    logger.info(f"[{self.agent_id}] Published {sensor_id} reading #{self.reading_count}: {value} {unit} to topic: {topic}")
-                    
-        except Exception as e:
-            logger.error(f"[{self.agent_id}] Error reading/publishing sensor data: {e}")
-
-    # Keep all your existing methods unchanged
-    def initialize_sensor(self):
-        """Initialize the Phidget infrared sensors for all 4 channels."""
         logger.info(f"[{self.agent_id}] Initializing infrared sensors for channels {self.channels}...")
 
         # Clear any existing sensors
@@ -121,7 +162,7 @@ class InfraredSensorAgent(SensorAgent):
 
         try:
             sensors = []
-            for i, channel in enumerate(self.channels):
+            for channel in self.channels:
                 logger.info(f"[{self.agent_id}] Creating VoltageRatioInput object for channel {channel}")
                 sensor = VoltageRatioInput()
 
@@ -181,7 +222,7 @@ class InfraredSensorAgent(SensorAgent):
                         pass
                     self.ir_sensors[channel] = None
                     self.sensor_initialized[channel] = False
-                raise PhidgetException(ErrorCode.EPHIDGET_TIMEOUT, "Some sensors failed to attach")
+                raise PhidgetException(ErrorCode.EPHIDGET_TIMEOUT)
 
         except PhidgetException as e:
             logger.error(f"[{self.agent_id}] PhidgetException in initialize_sensor: {e.code} ({hex(e.code)}) - {e.details}")
@@ -240,6 +281,15 @@ class InfraredSensorAgent(SensorAgent):
             # Hardware not ready yet, return None without logging spam
             return None, None, None
             
+        if channel not in self.channels:
+            current_time = time.time()
+            if current_time - self._last_warn_times.get(channel, {}).get('init_fail', 0) > 5:
+                logger.warning(f"[{self.agent_id}] Channel {channel} not in available channels {self.channels}; skipping read")
+                if channel not in self._last_warn_times:
+                    self._last_warn_times[channel] = {}
+                self._last_warn_times[channel]['init_fail'] = current_time
+            return None, None, None
+            
         if not self.sensor_initialized.get(channel, False):
             current_time = time.time()
             if current_time - self._last_warn_times[channel]['init_fail'] > 5:
@@ -248,12 +298,11 @@ class InfraredSensorAgent(SensorAgent):
             return None, None, None
 
         sensor = self.ir_sensors.get(channel)
-        if not sensor or not sensor.getAttached():
+        if not sensor:
             current_time = time.time()
-            if current_time - self._last_warn_times[channel]['attach_fail'] > 5:
-                logger.warning(f"[{self.agent_id}] Channel {channel} sensor not attached; skipping read")
-                self._last_warn_times[channel]['attach_fail'] = current_time
-            self.sensor_initialized[channel] = False
+            if current_time - self._last_warn_times[channel]['init_fail'] > 5:
+                logger.warning(f"[{self.agent_id}] Channel {channel} sensor object not found; skipping read")
+                self._last_warn_times[channel]['init_fail'] = current_time
             return None, None, None
 
         try:
@@ -351,3 +400,38 @@ class InfraredSensorAgent(SensorAgent):
         combined_metadata["primary_channel"] = primary_channel
 
         return primary_value, "cm", combined_metadata
+
+    def _read_and_publish(self):
+        """Override parent method to publish each channel to its own topic."""
+        try:
+            # Wait for hardware to be ready (max 10 seconds)
+            if not self.hardware_ready.wait(timeout=10.0):
+                logger.warning(f"[{self.agent_id}] Hardware initialization timeout - skipping read")
+                return
+            
+            self.reading_count += 1
+            # Read and publish ONLY for channels that have sensors
+            for channel in self.channels:
+                value, unit, metadata = self.read_sensor_channel(channel)
+                
+                if value is not None:  # Only publish if we got a valid reading
+                    sensor_id = self.channel_to_sensor_id[channel]
+                    
+                    # Create readSensor event for this specific channel
+                    # No target field needed - routing handled by MQTT topic
+                    event = EventFactory.create_sensor_event(
+                        sensor_id=sensor_id,
+                        sensor_type=self.sensor_type,
+                        value=value,
+                        unit=unit,
+                        metadata=metadata
+                    )
+                    
+                    # Publish to MQTT using the broadcast topic pattern for this specific sensor ID
+                    topic = TopicManager.sensor_broadcast(sensor_id)
+                    message = MQTTMessage.serialize(event)
+                    self.mqtt_client.publish(topic, message, qos=1)
+                    logger.info(f"[{self.agent_id}] Published {sensor_id} reading #{self.reading_count}: {value} {unit} to topic: {topic}")
+                    
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error reading/publishing sensor data: {e}")
