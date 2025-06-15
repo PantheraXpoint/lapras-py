@@ -4,18 +4,19 @@
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 # --- Simple Hue light motion sensor rules ---
+# ONLY cares about motion_status (motion vs no_motion)
 
-# Turn ON light when activity is detected
+# Turn ON light when motion is detected
 lapras:HueLightOnWhenMotionRule a lapras:Rule ;
     lapras:hasAgent "hue_light" ;
-    lapras:hasCondition lapras:IsActivityDetectedCondition ;
+    lapras:hasCondition lapras:IsMotionDetectedCondition ;
     lapras:hasCondition lapras:IsLightOffCondition ;
     lapras:hasAction lapras:SetHueLightPowerOn .
 
-lapras:IsActivityDetectedCondition
-    lapras:hasSensor "activity_detected" ;
+lapras:IsMotionDetectedCondition
+    lapras:hasSensor "motion_status" ;
     lapras:hasOperator lapras:equals ;
-    lapras:hasValue "true"^^xsd:boolean .
+    lapras:hasValue "motion" .
 
 lapras:IsLightOffCondition
     lapras:hasSensor "power" ;
@@ -24,11 +25,11 @@ lapras:IsLightOffCondition
 
 lapras:SetHueLightPowerOn lapras:hasStateUpdate '{"power": "on"}' .
 
-# Turn OFF light when no activity is detected
+# Turn OFF light when no motion is detected
 lapras:HueLightOffWhenNoMotionRule a lapras:Rule ;
     lapras:hasAgent "hue_light" ;
     lapras:hasCondition lapras:IsLightOnCondition ;
-    lapras:hasCondition lapras:IsNoCurrentActivityCondition ;
+    lapras:hasCondition lapras:IsNoMotionCondition ;
     lapras:hasAction lapras:SetHueLightPowerOff .
 
 lapras:IsLightOnCondition
@@ -36,9 +37,9 @@ lapras:IsLightOnCondition
     lapras:hasOperator lapras:equals ;
     lapras:hasValue "on" .
 
-lapras:IsNoCurrentActivityCondition
-    lapras:hasSensor "activity_detected" ;
+lapras:IsNoMotionCondition
+    lapras:hasSensor "motion_status" ;
     lapras:hasOperator lapras:equals ;
-    lapras:hasValue "false"^^xsd:boolean .
+    lapras:hasValue "no_motion" .
 
 lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' .

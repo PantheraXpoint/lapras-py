@@ -614,6 +614,9 @@ class ContextRuleManager:
             rule_threshold_value = None
             if isinstance(value_rdf_node, rdflib.Literal):
                 rule_threshold_value = value_rdf_node.value
+                # Debug logging for RDF value parsing
+                if sensor_id_from_rule == "activity_detected":
+                    logger.info(f"[{self.service_id}] RDF Parsing for {sensor_id_from_rule}: raw_literal='{value_rdf_node}', parsed_value='{rule_threshold_value}' ({type(rule_threshold_value)})")
             else:
                 logger.debug(f"[{self.service_id}] Rule value for '{sensor_id_from_rule}' is not a literal")
                 return False
@@ -629,12 +632,30 @@ class ContextRuleManager:
                     elif operator_str == "lessThanOrEqual": result = val_state_num <= rule_val_num
                 
                 elif operator_str == "equals":
-                    try:
-                        val_state_num = float(value_from_agent_state)
-                        rule_val_num = float(rule_threshold_value)
-                        result = (val_state_num == rule_val_num)
-                    except (ValueError, TypeError):
-                        result = str(value_from_agent_state) == str(rule_threshold_value)
+                    # Handle boolean values explicitly
+                    if isinstance(rule_threshold_value, bool):
+                        # Convert agent state value to boolean for comparison
+                        if isinstance(value_from_agent_state, bool):
+                            result = value_from_agent_state == rule_threshold_value
+                        elif isinstance(value_from_agent_state, str):
+                            # Convert string representation to boolean
+                            agent_bool = value_from_agent_state.lower() in ['true', '1', 'yes', 'on']
+                            result = agent_bool == rule_threshold_value
+                        else:
+                            # Try to convert to boolean-like value
+                            agent_bool = bool(value_from_agent_state)
+                            result = agent_bool == rule_threshold_value
+                        logger.debug(f"[{self.service_id}] Boolean comparison: agent_value='{value_from_agent_state}' ({type(value_from_agent_state)}), rule_value='{rule_threshold_value}' ({type(rule_threshold_value)}), result={result}")
+                    else:
+                        # Handle numeric values
+                        try:
+                            val_state_num = float(value_from_agent_state)
+                            rule_val_num = float(rule_threshold_value)
+                            result = (val_state_num == rule_val_num)
+                        except (ValueError, TypeError):
+                            # Fall back to string comparison
+                            result = str(value_from_agent_state) == str(rule_threshold_value)
+                            logger.debug(f"[{self.service_id}] String comparison: agent_value='{value_from_agent_state}', rule_value='{rule_threshold_value}', result={result}")
                 
                 elif operator_str == "notEquals":
                     try:
@@ -650,9 +671,11 @@ class ContextRuleManager:
                 logger.debug(f"[{self.service_id}] Type error in condition evaluation: {e}")
                 return False
             
-            # Only log condition details when they're true (to reduce log spam)
-            if result:
-                logger.debug(f"[{self.service_id}] Condition TRUE: '{value_from_agent_state}' {operator_str} '{rule_threshold_value}'")
+            # Log condition details for debugging (especially for boolean activity_detected)
+            if sensor_id_from_rule == "activity_detected" or result:
+                logger.info(f"[{self.service_id}] Condition {sensor_id_from_rule}: '{value_from_agent_state}' ({type(value_from_agent_state)}) {operator_str} '{rule_threshold_value}' ({type(rule_threshold_value)}) = {result}")
+            elif not result:
+                logger.debug(f"[{self.service_id}] Condition FALSE: '{value_from_agent_state}' {operator_str} '{rule_threshold_value}'")
             
             return result 
             

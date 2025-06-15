@@ -3,32 +3,56 @@
 @prefix lapras: <http://lapras.org/rule/> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-# --- Simple Hue light infrared + activity + motion sensor rules ---
+# --- Hue light infrared + activity + motion sensor OR logic rules ---
+# Turn ON light if ANY of: motion OR proximity OR activity is detected
+# Turn OFF light only if ALL of: no_motion AND far AND inactive
 
-# Turn ON light when ANY activity is detected (infrared, motion, or activity)
-lapras:HueLightOnWhenAnyActivityRule a lapras:Rule ;
+# Turn ON light when motion is detected (motion_status = "motion")
+lapras:HueLightOnWhenMotionRule a lapras:Rule ;
     lapras:hasAgent "hue_light" ;
-    lapras:hasCondition lapras:IsActivityDetectedCondition ;
-    lapras:hasCondition lapras:IsLightOffCondition ;
-    lapras:hasAction lapras:SetHueLightPowerOn .
+    lapras:hasCondition lapras:IsMotionCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOnFromMotion .
 
-lapras:IsActivityDetectedCondition
-    lapras:hasSensor "activity_detected" ;
+lapras:IsMotionCondition
+    lapras:hasSensor "motion_status" ;
     lapras:hasOperator lapras:equals ;
-    lapras:hasValue "true"^^xsd:boolean .
+    lapras:hasValue "motion" .
 
-lapras:IsLightOffCondition
-    lapras:hasSensor "power" ;
+lapras:SetHueLightPowerOnFromMotion lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn ON light when person is near (proximity_status = "near")
+lapras:HueLightOnWhenNearRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsNearCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOnFromProximity .
+
+lapras:IsNearCondition
+    lapras:hasSensor "proximity_status" ;
     lapras:hasOperator lapras:equals ;
-    lapras:hasValue "off" .
+    lapras:hasValue "near" .
 
-lapras:SetHueLightPowerOn lapras:hasStateUpdate '{"power": "on"}' .
+lapras:SetHueLightPowerOnFromProximity lapras:hasStateUpdate '{"power": "on"}' .
 
-# Turn OFF light when no current activity
-lapras:HueLightOffWhenNoActivityRule a lapras:Rule ;
+# Turn ON light when activity is active (activity_status = "active")
+lapras:HueLightOnWhenActivityRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsActivityActiveCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOnFromActivity .
+
+lapras:IsActivityActiveCondition
+    lapras:hasSensor "activity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "active" .
+
+lapras:SetHueLightPowerOnFromActivity lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn OFF light when ALL conditions met: no_motion AND far AND inactive
+lapras:HueLightOffWhenAllInactiveRule a lapras:Rule ;
     lapras:hasAgent "hue_light" ;
     lapras:hasCondition lapras:IsLightOnCondition ;
-    lapras:hasCondition lapras:IsNoCurrentActivityCondition ;
+    lapras:hasCondition lapras:IsNoMotionCondition ;
+    lapras:hasCondition lapras:IsFarCondition ;
+    lapras:hasCondition lapras:IsActivityInactiveCondition ;
     lapras:hasAction lapras:SetHueLightPowerOff .
 
 lapras:IsLightOnCondition
@@ -36,9 +60,19 @@ lapras:IsLightOnCondition
     lapras:hasOperator lapras:equals ;
     lapras:hasValue "on" .
 
-lapras:IsNoCurrentActivityCondition
-    lapras:hasSensor "activity_detected" ;
+lapras:IsNoMotionCondition
+    lapras:hasSensor "motion_status" ;
     lapras:hasOperator lapras:equals ;
-    lapras:hasValue "false"^^xsd:boolean .
+    lapras:hasValue "no_motion" .
+
+lapras:IsFarCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:IsActivityInactiveCondition
+    lapras:hasSensor "activity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "inactive" .
 
 lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' .
