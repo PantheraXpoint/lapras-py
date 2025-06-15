@@ -35,8 +35,8 @@ def main():
     parser = argparse.ArgumentParser(description='Start the Hue Light Agent with configurable sensors')
     parser.add_argument('--agent-id', default="hue_light", 
                        help='Agent ID for the light agent (default: hue_light)')
-    parser.add_argument('--transmission-interval', type=float, default=0.5,
-                       help='Transmission interval to context manager in seconds (default: 0.5)')
+    parser.add_argument('--transmission-interval', type=float, default=1.0,
+                       help='Transmission interval to context manager in seconds (default: 1.0)')
     parser.add_argument('--mqtt-broker', default="143.248.57.73",
                        help='MQTT broker address (default: 143.248.57.73)')
     parser.add_argument('--mqtt-port', type=int, default=1883,
@@ -74,9 +74,10 @@ def main():
             }
         elif args.preset == 'all-sensors':
             sensor_config = {
-                "infrared": ["infrared_1", "infrared_2"],
+                "light": ["light_1"],
+                "infrared": ["infrared_1", "infrared_2", "infrared_3", "infrared_4"],
                 "motion": ["motion_01", "motion_02", "motion_03", "motion_04", "motion_05", "motion_06", "motion_07", "motion_08", "motion_mp1", "motion_mf1","motion_mb1"],
-                "activity": ["activity_s1b", "activity_s2a", "activity_s3a", "activity_s4a","activity_s5a","activity_s6a","activity_s7a","activity_s2b","activity_s3b","activity_s4b","activity_s5b","activity_s6b","activity_s7b"]
+                "activity": ["activity_s1b", "activity_s2a", "activity_s3a", "activity_s4a","activity_s5a","activity_s6a","activity_s2b","activity_s3b","activity_s4b","activity_s5b","activity_s6b","activity_s7b"]
             }
         logger.info(f"[HUE] Using preset '{args.preset}' with sensors: {sensor_config}")
     elif args.sensors:

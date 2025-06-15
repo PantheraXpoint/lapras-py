@@ -27,8 +27,8 @@ class InfraredSensorAgent(SensorAgent):
         # Phidget sensors for 4 channels
         self.ir_sensors: Dict[int, Optional[VoltageRatioInput]] = {}
         self.sensor_initialized: Dict[int, bool] = {}
-        # self.channels = [channel, channel + 1, channel + 2, channel + 3]
-        self.channels = [channel, channel + 1]
+        self.channels = [channel, channel + 1, channel + 2, channel + 3]
+        # self.channels = [channel, channel + 1]
         
         # Create sensor IDs for each channel (infrared_1, infrared_2, infrared_3, infrared_4)
         self.sensor_ids = [f"{sensor_id}_{i+1}" for i in range(len(self.channels))]

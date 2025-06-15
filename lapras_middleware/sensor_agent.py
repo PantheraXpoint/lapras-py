@@ -19,7 +19,7 @@ class SensorAgent(Agent, ABC):
         
         # Sensor state
         self.last_reading_time = 0
-        self.reading_interval = 0.2  # Default 200ms reading interval
+        self.reading_interval = 1.0  # Default 1.0s reading interval
         self.reading_count = 0  # Track number of readings
         
         # Initialize the base Agent class
