@@ -39,7 +39,7 @@ class VirtualAgent(Agent, ABC):
         self.publish_thread.start()
         
         # Publish initial state after a short delay to ensure MQTT is connected
-        threading.Timer(1.0, lambda: self._publish_initial_state).start()
+        threading.Timer(1.0, lambda: self._publish_initial_state()).start()
     
     def _on_connect(self, client, userdata, flags, rc):
         """Override Agent's _on_connect to add virtual agent specific subscriptions."""
@@ -168,12 +168,13 @@ class VirtualAgent(Agent, ABC):
             
             # Prepare data for publishing while we have the lock
             complete_state = self.local_state.copy()
-            for sensor_id_inner, sensor_info in self.sensor_data.items():
-                complete_state[f"{sensor_id_inner}_value"] = sensor_info["value"]
-                complete_state[f"{sensor_id_inner}_unit"] = sensor_info["unit"]
-                if sensor_info["metadata"]:
-                    for key, value in sensor_info["metadata"].items():
-                        complete_state[f"{sensor_id_inner}_{key}"] = value
+            # Remove the flattened sensor data duplication - sensors section already contains all this data
+            # for sensor_id_inner, sensor_info in self.sensor_data.items():
+            #     complete_state[f"{sensor_id_inner}_value"] = sensor_info["value"]
+            #     complete_state[f"{sensor_id_inner}_unit"] = sensor_info["unit"]
+            #     if sensor_info["metadata"]:
+            #         for key, value in sensor_info["metadata"].items():
+            #             complete_state[f"{sensor_id_inner}_{key}"] = value
             sensor_data_copy = self.sensor_data.copy()
         
         logger.info(f"[{self.agent_id}] DEBUG: state_lock released")
@@ -314,18 +315,23 @@ class VirtualAgent(Agent, ABC):
             # logger.info(f"[{self.agent_id}] DEBUG: complete_state = {complete_state}")
             # logger.info(f"[{self.agent_id}] DEBUG: sensor_data_copy = {sensor_data_copy}")
             
+            # Clean sensor data for serialization if the method exists (dashboard agent has it)
+            cleaned_sensor_data = sensor_data_copy
+            if hasattr(self, '_clean_data_for_serialization'):
+                cleaned_sensor_data = self._clean_data_for_serialization(sensor_data_copy)
+            
             # Create updateContext event (ASYNCHRONOUS)
             context_event = EventFactory.create_context_event(
                 virtual_agent_id=self.agent_id,
                 agent_type=self.agent_type,
                 state=complete_state,
-                sensors=sensor_data_copy
+                sensors=cleaned_sensor_data
             )
             
             context_topic = TopicManager.virtual_to_context(self.agent_id)
             context_message = MQTTMessage.serialize(context_event)
             
-            logger.info(f"[{self.agent_id}] DEBUG: Queuing context update for topic: {context_topic}, state {complete_state['power']}, {complete_state['proximity_status']}")
+            logger.info(f"[{self.agent_id}] DEBUG: Queuing context update for topic: {context_topic}, state fields: {list(complete_state.keys())[:5]}")
             
             # Queue the publish operation instead of doing it directly to avoid MQTT deadlock
             publish_request = {
@@ -340,8 +346,8 @@ class VirtualAgent(Agent, ABC):
                 
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error publishing context update: {e}")
-            # import traceback
-            # logger.error(f"[{self.agent_id}] Publish context traceback: {traceback.format_exc()}")
+            import traceback
+            logger.error(f"[{self.agent_id}] Publish context traceback: {traceback.format_exc()}")
 
     def _publish_context_update(self):
         """Publish updateContext event with current complete state (legacy method - acquires lock)."""
@@ -353,13 +359,14 @@ class VirtualAgent(Agent, ABC):
                 # logger.info(f"[{self.agent_id}] DEBUG: local_state = {self.local_state}")
                 # logger.info(f"[{self.agent_id}] DEBUG: sensor_data = {self.sensor_data}")
                 
+                # Remove flattened sensor data duplication - sensors section already contains all this data
                 # Add sensor data to state
-                for sensor_id, sensor_info in self.sensor_data.items():
-                    complete_state[f"{sensor_id}_value"] = sensor_info["value"]
-                    complete_state[f"{sensor_id}_unit"] = sensor_info["unit"]
-                    if sensor_info["metadata"]:
-                        for key, value in sensor_info["metadata"].items():
-                            complete_state[f"{sensor_id}_{key}"] = value
+                # for sensor_id, sensor_info in self.sensor_data.items():
+                #     complete_state[f"{sensor_id}_value"] = sensor_info["value"]
+                #     complete_state[f"{sensor_id}_unit"] = sensor_info["unit"]
+                #     if sensor_info["metadata"]:
+                #         for key, value in sensor_info["metadata"].items():
+                #             complete_state[f"{sensor_id}_{key}"] = value
                 
                 # logger.info(f"[{self.agent_id}] DEBUG: complete_state = {complete_state}")
                 sensor_data_copy = self.sensor_data.copy()
@@ -384,13 +391,14 @@ class VirtualAgent(Agent, ABC):
                 # Local state changed, prepare data for publishing
                 complete_state = self.local_state.copy()
                 
+                # Remove flattened sensor data duplication - sensors section already contains all this data
                 # Add sensor data to state
-                for sensor_id, sensor_info in self.sensor_data.items():
-                    complete_state[f"{sensor_id}_value"] = sensor_info["value"]
-                    complete_state[f"{sensor_id}_unit"] = sensor_info["unit"]
-                    if sensor_info["metadata"]:
-                        for key, value in sensor_info["metadata"].items():
-                            complete_state[f"{sensor_id}_{key}"] = value
+                # for sensor_id, sensor_info in self.sensor_data.items():
+                #     complete_state[f"{sensor_id}_value"] = sensor_info["value"]
+                #     complete_state[f"{sensor_id}_unit"] = sensor_info["unit"]
+                #     if sensor_info["metadata"]:
+                #         for key, value in sensor_info["metadata"].items():
+                #             complete_state[f"{sensor_id}_{key}"] = value
                 
                 sensor_data_copy = self.sensor_data.copy()
                 
@@ -453,13 +461,14 @@ class VirtualAgent(Agent, ABC):
             
             with self.state_lock:
                 complete_state = self.local_state.copy()
+                # Remove flattened sensor data duplication - sensors section already contains all this data
                 # Add sensor data to state (though initially it will be empty)
-                for sensor_id, sensor_info in self.sensor_data.items():
-                    complete_state[f"{sensor_id}_value"] = sensor_info["value"]
-                    complete_state[f"{sensor_id}_unit"] = sensor_info["unit"]
-                    if sensor_info["metadata"]:
-                        for key, value in sensor_info["metadata"].items():
-                            complete_state[f"{sensor_id}_{key}"] = value
+                # for sensor_id, sensor_info in self.sensor_data.items():
+                #     complete_state[f"{sensor_id}_value"] = sensor_info["value"]
+                #     complete_state[f"{sensor_id}_unit"] = sensor_info["unit"]
+                #     if sensor_info["metadata"]:
+                #         for key, value in sensor_info["metadata"].items():
+                #             complete_state[f"{sensor_id}_{key}"] = value
                 sensor_data_copy = self.sensor_data.copy()
                 self.last_published_state = self.local_state.copy()
                 self.initial_state_published = True
