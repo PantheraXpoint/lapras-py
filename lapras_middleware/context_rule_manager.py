@@ -70,11 +70,13 @@ class ContextRuleManager:
         self.extended_window_lock = threading.Lock()
         self.EXTENDED_WINDOW_DURATION = 60.0  # 60 seconds
         
-        # Set up MQTT client with a unique client ID
-        mqtt_client_id = f"{self.service_id}-{int(time.time()*1000)}"
-        self.mqtt_client = mqtt.Client(client_id=mqtt_client_id)
+        # Set up MQTT client with a unique client ID and clean session
+        mqtt_client_id = f"{self.service_id}-{int(time.time()*1000)}-{uuid.uuid4().hex[:8]}"
+        self.mqtt_client = mqtt.Client(client_id=mqtt_client_id, clean_session=True)
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message
+        self.mqtt_client.on_subscribe = self._on_subscribe
+        self.mqtt_client.on_disconnect = self._on_disconnect
         
         # Enable logging for MQTT client (for debugging)
         self.mqtt_client.enable_logger(logger)
@@ -124,10 +126,22 @@ class ContextRuleManager:
         else:
             logger.error(f"[{self.service_id}] Failed to connect to MQTT broker. Result code: {rc}")
 
+    def _on_subscribe(self, client, userdata, mid, granted_qos):
+        """Callback when subscription is confirmed."""
+        logger.info(f"[{self.service_id}] Subscription confirmed for message ID {mid} with QoS {granted_qos}")
+
+    def _on_disconnect(self, client, userdata, rc):
+        """Callback when disconnected from MQTT broker."""
+        if rc != 0:
+            logger.warning(f"[{self.service_id}] Unexpected MQTT disconnection. Result code: {rc}")
+        else:
+            logger.info(f"[{self.service_id}] MQTT client disconnected normally")
+
     def _on_message(self, client, userdata, msg):
         """Callback when message is received from virtual agents or dashboard."""
         logger.info(f"[{self.service_id}] DEBUG: Message received on topic '{msg.topic}' with QoS {msg.qos}")
         logger.debug(f"[{self.service_id}] Message payload: {msg.payload.decode()[:200]}...")  # First 200 chars
+        
         try:
             # Check if it's a dashboard control command
             if msg.topic == "dashboard/control/command":
@@ -138,9 +152,16 @@ class ContextRuleManager:
             # Check if it's a rules management command
             if msg.topic == "context/rules/command":
                 logger.info(f"[{self.service_id}] DEBUG: Processing rules management command")
-                self._handle_rules_management_command(msg.payload.decode())
+                logger.debug(f"[{self.service_id}] Full rules command payload: {msg.payload.decode()}")
+                try:
+                    self._handle_rules_management_command(msg.payload.decode())
+                    logger.info(f"[{self.service_id}] DEBUG: Rules management command processed successfully")
+                except Exception as rules_error:
+                    logger.error(f"[{self.service_id}] ERROR in rules management command: {rules_error}", exc_info=True)
                 return
             
+            # For other message types, try to deserialize as Event
+            logger.debug(f"[{self.service_id}] Attempting to deserialize message as Event structure")
             event = MQTTMessage.deserialize(msg.payload.decode())
             logger.info(f"[{self.service_id}] DEBUG: Event type: {event.event.type}, Source: {event.source.entityId}")
             
@@ -153,10 +174,12 @@ class ContextRuleManager:
             else:
                 logger.warning(f"[{self.service_id}] Unknown event type: {event.event.type}")
                 
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as json_error:
             logger.error(f"[{self.service_id}] Message payload on topic '{msg.topic}' was not valid JSON: {msg.payload.decode(errors='ignore')}")
+            logger.error(f"[{self.service_id}] JSON decode error: {json_error}")
         except Exception as e:
-            logger.error(f"[{self.service_id}] Error processing message: {e}", exc_info=True)
+            logger.error(f"[{self.service_id}] Error processing message on topic '{msg.topic}': {e}", exc_info=True)
+            logger.error(f"[{self.service_id}] Message payload that caused error: {msg.payload.decode(errors='ignore')}")
 
     def _handle_dashboard_control_command(self, message_payload: str):
         """Handle manual control command from dashboard via MQTT."""

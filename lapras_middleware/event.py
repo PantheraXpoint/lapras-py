@@ -350,6 +350,17 @@ class TopicManager:
     def rules_management_result() -> str:
         """Topic for rules management command results."""
         return "context/rules/result"
+    
+    # DASHBOARD RULES TOPICS (via Rule Agent)
+    @staticmethod
+    def dashboard_rules_request() -> str:
+        """Topic for dashboard rule management requests."""
+        return "dashboard/rules/request"
+    
+    @staticmethod
+    def dashboard_rules_response() -> str:
+        """Topic for dashboard rule management responses."""
+        return "dashboard/rules/response"
 
     # SENSOR CONFIGURATION TOPICS
     @staticmethod
