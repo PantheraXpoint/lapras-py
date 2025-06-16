@@ -56,6 +56,11 @@ class VirtualAgent(Agent, ABC):
             client.subscribe(action_topic, qos=1)
             logger.info(f"[{self.agent_id}] Subscribed to action topic: {action_topic}")
             
+            # Subscribe to sensor configuration commands from ContextRuleManager
+            sensor_config_topic = TopicManager.sensor_config_command(self.agent_id)
+            client.subscribe(sensor_config_topic, qos=1)
+            logger.info(f"[{self.agent_id}] Subscribed to sensor config topic: {sensor_config_topic}")
+            
             # Subscribe to sensor broadcast topics from all managed sensors (ASYNCHRONOUS - one-to-many)
             for sensor_id in self.sensor_agents:
                 sensor_topic = TopicManager.sensor_broadcast(sensor_id) # sensor_id, "infrared_1", ...
@@ -70,6 +75,21 @@ class VirtualAgent(Agent, ABC):
             topic = msg.topic
             message = msg.payload.decode('utf-8')
             # logger.info(f"[{self.agent_id}] DEBUG: Received MQTT message on topic: {topic}, size: {len(message)} bytes")
+            
+            # Check if it's a sensor configuration command
+            sensor_config_topic = TopicManager.sensor_config_command(self.agent_id)
+            if topic == sensor_config_topic:
+                logger.info(f"[{self.agent_id}] DEBUG: Processing sensor configuration command")
+                try:
+                    event = MQTTMessage.deserialize(message)
+                    if event.event.type == "sensorConfig":
+                        logger.info(f"[{self.agent_id}] Received sensor configuration command")
+                        self._handle_sensor_config_command(event)
+                    else:
+                        logger.warning(f"[{self.agent_id}] Unexpected event type in sensor config topic: {event.event.type}")
+                except Exception as e:
+                    logger.error(f"[{self.agent_id}] Error processing sensor config command: {e}")
+                return
             
             # Check if it's an action command (SYNCHRONOUS - Request)
             action_topic = TopicManager.context_to_virtual_action(self.agent_id)
@@ -124,6 +144,175 @@ class VirtualAgent(Agent, ABC):
             logger.error(f"[{self.agent_id}] Error handling MQTT message: {e}")
             import traceback
             logger.error(f"[{self.agent_id}] Traceback: {traceback.format_exc()}")
+
+    def _handle_sensor_config_command(self, event):
+        """Handle sensor configuration commands received via MQTT from ContextRuleManager."""
+        try:
+            payload = event.payload
+            
+            # Verify this command is for this agent
+            target_agent_id = payload.get("target_agent_id")
+            if target_agent_id != self.agent_id:
+                logger.warning(f"[{self.agent_id}] Received sensor config command for different agent: {target_agent_id}")
+                return
+            
+            action = payload.get("action")
+            sensor_config = payload.get("sensor_config", {})
+            
+            logger.info(f"[{self.agent_id}] Processing sensor config command: {action}")
+            
+            success = False
+            message = ""
+            
+            if action == "configure":
+                success, message = self._reconfigure_all_sensors(sensor_config)
+            elif action == "add":
+                success, message = self._add_sensors_to_config(sensor_config)
+            elif action == "remove":
+                success, message = self._remove_sensors_from_config(sensor_config)
+            elif action == "list":
+                success, message = self._list_current_sensors()
+                success = True  # List is always successful
+            else:
+                message = f"Unknown sensor config action: {action}"
+                logger.warning(f"[{self.agent_id}] {message}")
+            
+            # Send result back to context manager
+            self._send_sensor_config_result(event.event.id, success, message, action)
+            
+        except Exception as e:
+            error_msg = f"Error handling sensor config command: {e}"
+            logger.error(f"[{self.agent_id}] {error_msg}")
+            self._send_sensor_config_result(event.event.id, False, error_msg, "unknown")
+
+    def _reconfigure_all_sensors(self, new_sensor_config: dict) -> tuple[bool, str]:
+        """Reconfigure all sensors with new configuration."""
+        try:
+            old_sensors = self.sensor_agents.copy()
+            
+            # Unsubscribe from all current sensor topics
+            for sensor_id in old_sensors:
+                sensor_topic = TopicManager.sensor_broadcast(sensor_id)
+                self.mqtt_client.unsubscribe(sensor_topic)
+                logger.info(f"[{self.agent_id}] Unsubscribed from sensor topic: {sensor_topic}")
+            
+            # Clear current sensor configuration
+            self.sensor_agents.clear()
+            with self.state_lock:
+                self.sensor_data.clear()
+            
+            # Add new sensors
+            total_added = 0
+            for sensor_type, sensor_ids in new_sensor_config.items():
+                for sensor_id in sensor_ids:
+                    self.add_sensor_agent(sensor_id)
+                    total_added += 1
+            
+            # Update subclass-specific sensor configuration if method exists
+            if hasattr(self, '_update_sensor_config'):
+                self._update_sensor_config(new_sensor_config)
+            
+            message = f"Successfully reconfigured sensors: removed {len(old_sensors)}, added {total_added}"
+            logger.info(f"[{self.agent_id}] {message}")
+            return True, message
+            
+        except Exception as e:
+            error_msg = f"Error reconfiguring sensors: {e}"
+            logger.error(f"[{self.agent_id}] {error_msg}")
+            return False, error_msg
+
+    def _add_sensors_to_config(self, sensor_config: dict) -> tuple[bool, str]:
+        """Add new sensors to existing configuration."""
+        try:
+            added_count = 0
+            for sensor_type, sensor_ids in sensor_config.items():
+                for sensor_id in sensor_ids:
+                    if sensor_id not in self.sensor_agents:
+                        self.add_sensor_agent(sensor_id)
+                        added_count += 1
+                        logger.info(f"[{self.agent_id}] Added {sensor_type} sensor: {sensor_id}")
+                    else:
+                        logger.info(f"[{self.agent_id}] Sensor {sensor_id} already exists")
+            
+            # Update subclass-specific sensor configuration if method exists
+            if hasattr(self, '_update_sensor_config'):
+                self._update_sensor_config(sensor_config, action="add")
+            
+            message = f"Successfully added {added_count} sensors"
+            logger.info(f"[{self.agent_id}] {message}")
+            return True, message
+            
+        except Exception as e:
+            error_msg = f"Error adding sensors: {e}"
+            logger.error(f"[{self.agent_id}] {error_msg}")
+            return False, error_msg
+
+    def _remove_sensors_from_config(self, sensor_config: dict) -> tuple[bool, str]:
+        """Remove sensors from configuration."""
+        try:
+            removed_count = 0
+            for sensor_type, sensor_ids in sensor_config.items():
+                for sensor_id in sensor_ids:
+                    if sensor_id in self.sensor_agents:
+                        self.remove_sensor_agent(sensor_id)
+                        removed_count += 1
+                        logger.info(f"[{self.agent_id}] Removed {sensor_type} sensor: {sensor_id}")
+                    else:
+                        logger.warning(f"[{self.agent_id}] Sensor {sensor_id} not found")
+            
+            # Update subclass-specific sensor configuration if method exists
+            if hasattr(self, '_update_sensor_config'):
+                self._update_sensor_config(sensor_config, action="remove")
+            
+            message = f"Successfully removed {removed_count} sensors"
+            logger.info(f"[{self.agent_id}] {message}")
+            return True, message
+            
+        except Exception as e:
+            error_msg = f"Error removing sensors: {e}"
+            logger.error(f"[{self.agent_id}] {error_msg}")
+            return False, error_msg
+
+    def _list_current_sensors(self) -> tuple[bool, str]:
+        """List current sensor configuration."""
+        try:
+            # Get current sensor configuration from subclass if available
+            if hasattr(self, 'sensor_config'):
+                config_info = []
+                for sensor_type, sensor_ids in self.sensor_config.items():
+                    config_info.append(f"{sensor_type}: {sensor_ids}")
+                message = f"Current sensor configuration ({len(self.sensor_agents)} total): " + "; ".join(config_info)
+            else:
+                message = f"Current sensors ({len(self.sensor_agents)} total): {self.sensor_agents}"
+            
+            logger.info(f"[{self.agent_id}] {message}")
+            return True, message
+            
+        except Exception as e:
+            error_msg = f"Error listing sensors: {e}"
+            logger.error(f"[{self.agent_id}] {error_msg}")
+            return False, error_msg
+
+    def _send_sensor_config_result(self, command_id: str, success: bool, message: str, action: str):
+        """Send sensor configuration result back to context manager."""
+        try:
+            result_event = EventFactory.create_sensor_config_result_event(
+                agent_id=self.agent_id,
+                command_id=command_id,
+                success=success,
+                message=message,
+                action=action,
+                current_sensors=self.sensor_agents
+            )
+            
+            result_topic = TopicManager.sensor_config_result(self.agent_id)
+            result_message = MQTTMessage.serialize(result_event)
+            self.mqtt_client.publish(result_topic, result_message, qos=1)
+            
+            logger.info(f"[{self.agent_id}] Published sensor config result: {command_id} - {success}")
+            
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error publishing sensor config result: {e}")
     
     def _update_sensor_data(self, event, sensor_payload: SensorPayload):
         """Update sensor data and trigger perception update."""
@@ -168,13 +357,6 @@ class VirtualAgent(Agent, ABC):
             
             # Prepare data for publishing while we have the lock
             complete_state = self.local_state.copy()
-            # Remove the flattened sensor data duplication - sensors section already contains all this data
-            # for sensor_id_inner, sensor_info in self.sensor_data.items():
-            #     complete_state[f"{sensor_id_inner}_value"] = sensor_info["value"]
-            #     complete_state[f"{sensor_id_inner}_unit"] = sensor_info["unit"]
-            #     if sensor_info["metadata"]:
-            #         for key, value in sensor_info["metadata"].items():
-            #             complete_state[f"{sensor_id_inner}_{key}"] = value
             sensor_data_copy = self.sensor_data.copy()
         
         logger.info(f"[{self.agent_id}] DEBUG: state_lock released")
@@ -359,15 +541,6 @@ class VirtualAgent(Agent, ABC):
                 # logger.info(f"[{self.agent_id}] DEBUG: local_state = {self.local_state}")
                 # logger.info(f"[{self.agent_id}] DEBUG: sensor_data = {self.sensor_data}")
                 
-                # Remove flattened sensor data duplication - sensors section already contains all this data
-                # Add sensor data to state
-                # for sensor_id, sensor_info in self.sensor_data.items():
-                #     complete_state[f"{sensor_id}_value"] = sensor_info["value"]
-                #     complete_state[f"{sensor_id}_unit"] = sensor_info["unit"]
-                #     if sensor_info["metadata"]:
-                #         for key, value in sensor_info["metadata"].items():
-                #             complete_state[f"{sensor_id}_{key}"] = value
-                
                 # logger.info(f"[{self.agent_id}] DEBUG: complete_state = {complete_state}")
                 sensor_data_copy = self.sensor_data.copy()
             
@@ -390,15 +563,6 @@ class VirtualAgent(Agent, ABC):
             if self.last_published_state != self.local_state:
                 # Local state changed, prepare data for publishing
                 complete_state = self.local_state.copy()
-                
-                # Remove flattened sensor data duplication - sensors section already contains all this data
-                # Add sensor data to state
-                # for sensor_id, sensor_info in self.sensor_data.items():
-                #     complete_state[f"{sensor_id}_value"] = sensor_info["value"]
-                #     complete_state[f"{sensor_id}_unit"] = sensor_info["unit"]
-                #     if sensor_info["metadata"]:
-                #         for key, value in sensor_info["metadata"].items():
-                #             complete_state[f"{sensor_id}_{key}"] = value
                 
                 sensor_data_copy = self.sensor_data.copy()
                 
@@ -461,14 +625,6 @@ class VirtualAgent(Agent, ABC):
             
             with self.state_lock:
                 complete_state = self.local_state.copy()
-                # Remove flattened sensor data duplication - sensors section already contains all this data
-                # Add sensor data to state (though initially it will be empty)
-                # for sensor_id, sensor_info in self.sensor_data.items():
-                #     complete_state[f"{sensor_id}_value"] = sensor_info["value"]
-                #     complete_state[f"{sensor_id}_unit"] = sensor_info["unit"]
-                #     if sensor_info["metadata"]:
-                #         for key, value in sensor_info["metadata"].items():
-                #             complete_state[f"{sensor_id}_{key}"] = value
                 sensor_data_copy = self.sensor_data.copy()
                 self.last_published_state = self.local_state.copy()
                 self.initial_state_published = True

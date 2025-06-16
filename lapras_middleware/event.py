@@ -261,6 +261,35 @@ class EventFactory:
             }
         )
 
+    @staticmethod
+    def create_sensor_config_result_event(
+        agent_id: str,
+        command_id: str,
+        success: bool,
+        message: str,
+        action: str,
+        current_sensors: List[str]
+    ) -> Event:
+        """Create a sensorConfigResult event from virtual agent back to context manager."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="sensorConfigResult"
+            ),
+            source=EntityInfo(
+                entityType="virtualAgent",
+                entityId=agent_id
+            ),
+            payload={
+                "command_id": command_id,
+                "success": success,
+                "message": message,
+                "action": action,
+                "current_sensors": current_sensors
+            }
+        )
+
 class MQTTMessage:
     """Utility class for MQTT message serialization/deserialization."""
     
@@ -371,4 +400,15 @@ class TopicManager:
     @staticmethod
     def sensor_config_result(agent_id: str) -> str:
         """Topic for sensor configuration command results."""
-        return f"agent/{agent_id}/sensorConfig/result" 
+        return f"agent/{agent_id}/sensorConfig/result"
+
+    # DASHBOARD SENSOR CONFIG TOPICS
+    @staticmethod
+    def dashboard_sensor_config_command() -> str:
+        """Topic for dashboard sensor configuration commands to context manager."""
+        return "dashboard/sensor/config/command"
+    
+    @staticmethod
+    def dashboard_sensor_config_result() -> str:
+        """Topic for dashboard sensor configuration command results."""
+        return "dashboard/sensor/config/result" 

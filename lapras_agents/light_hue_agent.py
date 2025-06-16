@@ -44,17 +44,12 @@ class LightHueAgent(VirtualAgent):
             "motion_status": "unknown", 
             "activity_status": "unknown",
             "activity_detected": False,
-            # Remove sensor_states - sensors section already contains all this data
-            # "sensor_states": {},  # Store sensor states with timestamps
         })
         
         self.sensor_data = defaultdict(dict)  # Store sensor data with sensor_id as key
         
         # Dynamically add sensors based on configuration
         self._configure_sensors()
-        
-        # Subscribe to sensor configuration commands
-        self._setup_sensor_config_subscription()
         
         logger.info(f"[{self.agent_id}] LightHueAgent initialization completed with sensors: {sensor_config} and transmission interval: {transmission_interval}s")
     
@@ -73,134 +68,35 @@ class LightHueAgent(VirtualAgent):
         
         logger.info(f"[{self.agent_id}] Configured {total_sensors} sensors across {len(self.sensor_config)} sensor types")
     
-    def _setup_sensor_config_subscription(self):
-        """Set up MQTT subscription for sensor configuration commands."""
+    def _update_sensor_config(self, new_sensor_config: dict, action: str = "configure"):
+        """Update subclass-specific sensor configuration (called by base class)."""
         try:
-            config_topic = f"agent/{self.agent_id}/sensorConfig"
-            self.mqtt_client.subscribe(config_topic)
-            self.mqtt_client.message_callback_add(config_topic, self._handle_sensor_config_command)
-            logger.info(f"[{self.agent_id}] Subscribed to sensor configuration commands on: {config_topic}")
-        except Exception as e:
-            logger.error(f"[{self.agent_id}] Error setting up sensor config subscription: {e}")
-    
-    def _handle_sensor_config_command(self, client, userdata, message):
-        """Handle sensor configuration commands received via MQTT."""
-        try:
-            import json
-            from lapras_middleware.event import MQTTMessage
-            
-            # Deserialize the event
-            event = MQTTMessage.deserialize(message.payload.decode())
-            payload = event.payload
-            
-            if payload.get("target_agent_id") != self.agent_id:
-                return  # Not for this agent
-            
-            action = payload.get("action")
-            sensor_config = payload.get("sensor_config", {})
-            
-            logger.info(f"[{self.agent_id}] Received sensor config command: {action}")
-            
             if action == "configure":
-                self._reconfigure_sensors(sensor_config)
+                # Replace entire configuration
+                self.sensor_config = new_sensor_config
             elif action == "add":
-                self._add_sensors(sensor_config)
-            elif action == "remove":
-                self._remove_sensors(sensor_config)
-            elif action == "list":
-                self._list_sensors()
-            else:
-                logger.warning(f"[{self.agent_id}] Unknown sensor config action: {action}")
-                
-        except Exception as e:
-            logger.error(f"[{self.agent_id}] Error handling sensor config command: {e}")
-    
-    def _reconfigure_sensors(self, new_sensor_config: dict):
-        """Reconfigure all sensors with new configuration."""
-        try:
-            # Remove all current sensor subscriptions
-            self._remove_all_sensors()
-            
-            # Update configuration
-            self.sensor_config = new_sensor_config
-            
-            # Add new sensors
-            self._configure_sensors()
-            
-            logger.info(f"[{self.agent_id}] Sensors reconfigured: {new_sensor_config}")
-        except Exception as e:
-            logger.error(f"[{self.agent_id}] Error reconfiguring sensors: {e}")
-    
-    def _add_sensors(self, sensor_config: dict):
-        """Add new sensors to existing configuration."""
-        try:
-            for sensor_type, sensor_ids in sensor_config.items():
-                if sensor_type not in self.supported_sensor_types:
-                    logger.warning(f"[{self.agent_id}] Unsupported sensor type: {sensor_type}")
-                    continue
-                
-                # Add to existing config or create new entry
-                if sensor_type not in self.sensor_config:
-                    self.sensor_config[sensor_type] = []
-                
-                for sensor_id in sensor_ids:
-                    if sensor_id not in self.sensor_config[sensor_type]:
-                        self.sensor_config[sensor_type].append(sensor_id)
-                        self.add_sensor_agent(sensor_id)
-                        logger.info(f"[{self.agent_id}] Added {sensor_type} sensor: {sensor_id}")
-                    else:
-                        logger.info(f"[{self.agent_id}] Sensor {sensor_id} already exists")
-            
-            logger.info(f"[{self.agent_id}] Sensors added. Current config: {self.sensor_config}")
-        except Exception as e:
-            logger.error(f"[{self.agent_id}] Error adding sensors: {e}")
-    
-    def _remove_sensors(self, sensor_config: dict):
-        """Remove sensors from configuration."""
-        try:
-            for sensor_type, sensor_ids in sensor_config.items():
-                if sensor_type in self.sensor_config:
+                # Add to existing configuration
+                for sensor_type, sensor_ids in new_sensor_config.items():
+                    if sensor_type not in self.sensor_config:
+                        self.sensor_config[sensor_type] = []
                     for sensor_id in sensor_ids:
-                        if sensor_id in self.sensor_config[sensor_type]:
-                            self.sensor_config[sensor_type].remove(sensor_id)
-                            # Note: We don't remove MQTT subscription as it might be used by other agents
-                            logger.info(f"[{self.agent_id}] Removed {sensor_type} sensor: {sensor_id}")
-                        else:
-                            logger.warning(f"[{self.agent_id}] Sensor {sensor_id} not found in {sensor_type}")
-                    
-                    # Remove empty sensor types
-                    if not self.sensor_config[sensor_type]:
-                        del self.sensor_config[sensor_type]
+                        if sensor_id not in self.sensor_config[sensor_type]:
+                            self.sensor_config[sensor_type].append(sensor_id)
+            elif action == "remove":
+                # Remove from existing configuration
+                for sensor_type, sensor_ids in new_sensor_config.items():
+                    if sensor_type in self.sensor_config:
+                        for sensor_id in sensor_ids:
+                            if sensor_id in self.sensor_config[sensor_type]:
+                                self.sensor_config[sensor_type].remove(sensor_id)
+                        # Remove empty sensor types
+                        if not self.sensor_config[sensor_type]:
+                            del self.sensor_config[sensor_type]
             
-            logger.info(f"[{self.agent_id}] Sensors removed. Current config: {self.sensor_config}")
-        except Exception as e:
-            logger.error(f"[{self.agent_id}] Error removing sensors: {e}")
-    
-    def _remove_all_sensors(self):
-        """Remove all sensor subscriptions."""
-        try:
-            # Clear sensor configuration
-            self.sensor_config = {}
+            logger.info(f"[{self.agent_id}] Updated sensor configuration: {self.sensor_config}")
             
-            # Clear sensor data
-            with self.state_lock:
-                self.sensor_data.clear()
-                # Remove sensor_states clearing since we no longer use it
-                # self.local_state["sensor_states"] = {}
-            
-            logger.info(f"[{self.agent_id}] All sensors removed")
         except Exception as e:
-            logger.error(f"[{self.agent_id}] Error removing all sensors: {e}")
-    
-    def _list_sensors(self):
-        """List current sensor configuration."""
-        try:
-            total_sensors = sum(len(sensors) for sensors in self.sensor_config.values())
-            logger.info(f"[{self.agent_id}] Current sensor configuration ({total_sensors} total sensors):")
-            for sensor_type, sensor_ids in self.sensor_config.items():
-                logger.info(f"[{self.agent_id}]   {sensor_type}: {sensor_ids}")
-        except Exception as e:
-            logger.error(f"[{self.agent_id}] Error listing sensors: {e}")
+            logger.error(f"[{self.agent_id}] Error updating sensor configuration: {e}")
     
     def _process_sensor_update(self, sensor_payload: SensorPayload, sensor_id: str):
         """Process all sensor data updates immediately - no timing logic."""
@@ -419,13 +315,6 @@ class LightHueAgent(VirtualAgent):
             
             # Prepare data for publishing while we have the lock
             complete_state = self.local_state.copy()
-            # Remove flattened sensor data duplication - sensors section already contains all this data
-            # for sensor_id_inner, sensor_info in self.sensor_data.items():
-            #     complete_state[f"{sensor_id_inner}_value"] = sensor_info["value"]
-            #     complete_state[f"{sensor_id_inner}_unit"] = sensor_info["unit"]
-            #     if sensor_info["metadata"]:
-            #         for key, value in sensor_info["metadata"].items():
-            #             complete_state[f"{sensor_id_inner}_{key}"] = value
             sensor_data_copy = self.sensor_data.copy()
         
         # logger.info(f"[{self.agent_id}] DEBUG: state_lock released")

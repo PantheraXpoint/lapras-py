@@ -123,6 +123,18 @@ class ContextRuleManager:
             rules_management_topic = "context/rules/command"
             result4 = self.mqtt_client.subscribe(rules_management_topic, qos=1)
             logger.info(f"[{self.service_id}] Subscribed to rules management topic: {rules_management_topic} (result: {result4})")
+            
+            # Subscribe to dashboard sensor configuration commands
+            # Topic: dashboard/sensor/config/command
+            sensor_config_topic = TopicManager.dashboard_sensor_config_command()
+            result5 = self.mqtt_client.subscribe(sensor_config_topic, qos=1)
+            logger.info(f"[{self.service_id}] Subscribed to sensor config topic: {sensor_config_topic} (result: {result5})")
+            
+            # Subscribe to sensor configuration results from virtual agents
+            # Topic pattern: agent/+/sensorConfig/result
+            sensor_config_result_pattern = "agent/+/sensorConfig/result"
+            result6 = self.mqtt_client.subscribe(sensor_config_result_pattern, qos=1)
+            logger.info(f"[{self.service_id}] Subscribed to sensor config result pattern: {sensor_config_result_pattern} (result: {result6})")
         else:
             logger.error(f"[{self.service_id}] Failed to connect to MQTT broker. Result code: {rc}")
 
@@ -158,6 +170,26 @@ class ContextRuleManager:
                     logger.info(f"[{self.service_id}] DEBUG: Rules management command processed successfully")
                 except Exception as rules_error:
                     logger.error(f"[{self.service_id}] ERROR in rules management command: {rules_error}", exc_info=True)
+                return
+            
+            # Check if it's a dashboard sensor configuration command
+            if msg.topic == TopicManager.dashboard_sensor_config_command():
+                logger.info(f"[{self.service_id}] DEBUG: Processing sensor configuration command")
+                try:
+                    self._handle_sensor_config_command(msg.payload.decode())
+                    logger.info(f"[{self.service_id}] DEBUG: Sensor configuration command processed successfully")
+                except Exception as sensor_error:
+                    logger.error(f"[{self.service_id}] ERROR in sensor configuration command: {sensor_error}", exc_info=True)
+                return
+            
+            # Check if it's a sensor configuration result from virtual agent
+            if msg.topic.startswith("agent/") and msg.topic.endswith("/sensorConfig/result"):
+                logger.info(f"[{self.service_id}] DEBUG: Processing sensor configuration result")
+                try:
+                    self._handle_sensor_config_result(msg.payload.decode())
+                    logger.info(f"[{self.service_id}] DEBUG: Sensor configuration result processed successfully")
+                except Exception as result_error:
+                    logger.error(f"[{self.service_id}] ERROR in sensor configuration result: {result_error}", exc_info=True)
                 return
             
             # For other message types, try to deserialize as Event
@@ -1114,4 +1146,116 @@ class ContextRuleManager:
                     "last_update": agent_data["last_update"],
                     "is_responsive": (time.time() - agent_data["last_update"]) < 300  # 5 minute timeout
                 }
-            return None 
+            return None
+
+    def _handle_sensor_config_command(self, message_payload: str):
+        """Handle sensor configuration command from dashboard and forward to virtual agent."""
+        try:
+            # Parse as Event structure
+            event = MQTTMessage.deserialize(message_payload)
+            
+            if event.event.type != "sensorConfig":
+                logger.error(f"[{self.service_id}] Expected sensorConfig event type, got: {event.event.type}")
+                return
+            
+            logger.info(f"[{self.service_id}] Received sensor configuration command: {event.event.id}")
+            
+            # Extract command details from payload
+            target_agent_id = event.payload.get('target_agent_id')
+            action = event.payload.get('action')
+            sensor_config = event.payload.get('sensor_config', {})
+            command_id = event.event.id
+            
+            if not target_agent_id or not action:
+                logger.error(f"[{self.service_id}] Sensor config command missing required fields: {event.payload}")
+                self._publish_sensor_config_command_result(command_id, False, "Missing target_agent_id or action", target_agent_id)
+                return
+            
+            # Check if agent exists
+            if target_agent_id not in self.known_agents:
+                logger.warning(f"[{self.service_id}] Sensor config command for unknown agent: {target_agent_id}")
+                self._publish_sensor_config_command_result(command_id, False, f"Agent {target_agent_id} not found", target_agent_id)
+                return
+            
+            # Forward the sensor config command to the target virtual agent
+            target_topic = TopicManager.sensor_config_command(target_agent_id)
+            forward_message = MQTTMessage.serialize(event)
+            publish_result = self.mqtt_client.publish(target_topic, forward_message, qos=1)
+            
+            # Log the forwarded command
+            logger.info(f"[{self.service_id}] SENSOR CONFIG COMMAND forwarded to {target_agent_id}: {action}")
+            if sensor_config:
+                logger.info(f"[{self.service_id}] Sensor config: {sensor_config}")
+            logger.info(f"[{self.service_id}] Command ID: {command_id}")
+            
+            # Note: We don't send immediate result here - we wait for the virtual agent's response
+            
+        except json.JSONDecodeError:
+            logger.error(f"[{self.service_id}] Invalid JSON in sensor config command: {message_payload}")
+            self._publish_sensor_config_command_result("unknown", False, "Invalid JSON format", None)
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error processing sensor config command: {e}", exc_info=True)
+            self._publish_sensor_config_command_result("unknown", False, f"Error: {str(e)}", None)
+
+    def _handle_sensor_config_result(self, message_payload: str):
+        """Handle sensor configuration result from virtual agent and forward to dashboard."""
+        try:
+            # Parse as Event structure
+            event = MQTTMessage.deserialize(message_payload)
+            
+            if event.event.type != "sensorConfigResult":
+                logger.error(f"[{self.service_id}] Expected sensorConfigResult event type, got: {event.event.type}")
+                return
+            
+            logger.info(f"[{self.service_id}] Received sensor configuration result: {event.event.id}")
+            
+            # Extract result details from payload
+            agent_id = event.source.entityId
+            command_id = event.payload.get('command_id')
+            success = event.payload.get('success')
+            message = event.payload.get('message')
+            action = event.payload.get('action')
+            current_sensors = event.payload.get('current_sensors', [])
+            
+            logger.info(f"[{self.service_id}] Agent {agent_id} sensor config result: {success} - {message}")
+            
+            # Forward result to dashboard
+            self._publish_sensor_config_command_result(command_id, success, message, agent_id, action, current_sensors)
+            
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error processing sensor config result: {e}", exc_info=True)
+
+    def _publish_sensor_config_command_result(self, command_id: str, success: bool, message: str, 
+                                            agent_id: Optional[str], action: Optional[str] = None, 
+                                            current_sensors: Optional[List[str]] = None):
+        """Publish sensor configuration command result back to dashboard via MQTT using Event structure."""
+        try:
+            # Create Event structure for command result
+            result_event = Event(
+                event=EventMetadata(
+                    id="",  # Auto-generated
+                    timestamp="",  # Auto-generated  
+                    type="sensorConfigCommandResult"
+                ),
+                source=EntityInfo(
+                    entityType="contextManager",
+                    entityId="CM-MainController"
+                ),
+                payload={
+                    "command_id": command_id,
+                    "success": success,
+                    "message": message,
+                    "agent_id": agent_id,
+                    "action": action,
+                    "current_sensors": current_sensors or []
+                }
+            )
+            
+            result_topic = TopicManager.dashboard_sensor_config_result()
+            result_message = MQTTMessage.serialize(result_event)
+            self.mqtt_client.publish(result_topic, result_message, qos=1)
+            
+            logger.info(f"[{self.service_id}] Published sensor config command result: {command_id} - {success}")
+            
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error publishing sensor config command result: {e}") 

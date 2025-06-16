@@ -86,6 +86,42 @@ class DashboardAgent(VirtualAgent):
         self.local_state["total_sensors"] = total_sensors
         logger.info(f"[{self.agent_id}] Configured {total_sensors} sensors across {len(self.sensor_config)} sensor types")
     
+    def _update_sensor_config(self, new_sensor_config: dict, action: str = "configure"):
+        """Update subclass-specific sensor configuration (called by base class)."""
+        try:
+            if action == "configure":
+                # Replace entire configuration
+                self.sensor_config = new_sensor_config
+            elif action == "add":
+                # Add to existing configuration
+                for sensor_type, sensor_ids in new_sensor_config.items():
+                    if sensor_type not in self.sensor_config:
+                        self.sensor_config[sensor_type] = []
+                    for sensor_id in sensor_ids:
+                        if sensor_id not in self.sensor_config[sensor_type]:
+                            self.sensor_config[sensor_type].append(sensor_id)
+            elif action == "remove":
+                # Remove from existing configuration
+                for sensor_type, sensor_ids in new_sensor_config.items():
+                    if sensor_type in self.sensor_config:
+                        for sensor_id in sensor_ids:
+                            if sensor_id in self.sensor_config[sensor_type]:
+                                self.sensor_config[sensor_type].remove(sensor_id)
+                        # Remove empty sensor types
+                        if not self.sensor_config[sensor_type]:
+                            del self.sensor_config[sensor_type]
+            
+            # Update total sensors count
+            total_sensors = sum(len(sensors) for sensors in self.sensor_config.values())
+            with self.state_lock:
+                self.local_state["total_sensors"] = total_sensors
+            
+            logger.info(f"[{self.agent_id}] Updated sensor configuration: {self.sensor_config}")
+            logger.info(f"[{self.agent_id}] Total sensors now: {total_sensors}")
+            
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error updating sensor configuration: {e}")
+    
     def _process_sensor_update(self, sensor_payload: SensorPayload, sensor_id: str):
         """Process all sensor data updates for dashboard monitoring."""
         current_time = time.time()
@@ -126,15 +162,6 @@ class DashboardAgent(VirtualAgent):
                 "metadata": sensor_payload.metadata,
                 "last_update": current_time
             }
-            
-            # Remove flattened sensor data creation - sensors section already contains all this data
-            # Add to local state for context manager
-            # self.local_state[f"{sensor_id}_distance"] = sensor_payload.value
-            # self.local_state[f"{sensor_id}_unit"] = sensor_payload.unit
-            # 
-            # if sensor_payload.metadata:
-            #     proximity_status = sensor_payload.metadata.get("proximity_status", "unknown")
-            #     self.local_state[f"{sensor_id}_proximity"] = proximity_status
     
     def _process_motion_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
         """Process motion sensor updates."""
@@ -146,14 +173,6 @@ class DashboardAgent(VirtualAgent):
                 "metadata": sensor_payload.metadata,
                 "last_update": current_time
             }
-            
-            # Remove flattened sensor data creation - sensors section already contains all this data
-            # Add to local state for context manager
-            # self.local_state[f"{sensor_id}_motion"] = sensor_payload.value
-            # 
-            # if sensor_payload.metadata:
-            #     motion_status = sensor_payload.metadata.get("motion_status", "unknown")
-            #     self.local_state[f"{sensor_id}_status"] = motion_status
     
     def _process_temperature_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
         """Process temperature sensor updates."""
@@ -165,15 +184,6 @@ class DashboardAgent(VirtualAgent):
                 "metadata": sensor_payload.metadata,
                 "last_update": current_time
             }
-            
-            # Remove flattened sensor data creation - sensors section already contains all this data
-            # Add to local state for context manager
-            # self.local_state[f"{sensor_id}_temperature"] = sensor_payload.value
-            # self.local_state[f"{sensor_id}_unit"] = sensor_payload.unit
-            # 
-            # if sensor_payload.metadata:
-            #     temp_status = sensor_payload.metadata.get("temperature_status", "unknown")
-            #     self.local_state[f"{sensor_id}_status"] = temp_status
     
     def _process_door_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
         """Process door sensor updates."""
@@ -185,14 +195,6 @@ class DashboardAgent(VirtualAgent):
                 "metadata": sensor_payload.metadata,
                 "last_update": current_time
             }
-            
-            # Remove flattened sensor data creation - sensors section already contains all this data
-            # Add to local state for context manager
-            # self.local_state[f"{sensor_id}_open"] = sensor_payload.value
-            # 
-            # if sensor_payload.metadata:
-            #     door_status = sensor_payload.metadata.get("door_status", "unknown")
-            #     self.local_state[f"{sensor_id}_status"] = door_status
     
     def _process_activity_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
         """Process activity sensor updates."""
@@ -204,14 +206,6 @@ class DashboardAgent(VirtualAgent):
                 "metadata": sensor_payload.metadata,
                 "last_update": current_time
             }
-            
-            # Remove flattened sensor data creation - sensors section already contains all this data
-            # Add to local state for context manager
-            # self.local_state[f"{sensor_id}_active"] = sensor_payload.value
-            # 
-            # if sensor_payload.metadata:
-            #     activity_status = sensor_payload.metadata.get("activity_status", "unknown")
-            #     self.local_state[f"{sensor_id}_status"] = activity_status
     
     def _process_light_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
         """Process light sensor updates."""
@@ -223,14 +217,6 @@ class DashboardAgent(VirtualAgent):
                 "metadata": sensor_payload.metadata,
                 "last_update": current_time
             }
-            
-            # Remove flattened sensor data creation - sensors section already contains all this data
-            # Add to local state for context manager
-            # self.local_state[f"{sensor_id}_light"] = sensor_payload.value
-            # 
-            # if sensor_payload.metadata:
-            #     light_status = sensor_payload.metadata.get("light_status", "unknown")
-            #     self.local_state[f"{sensor_id}_status"] = light_status
     
     def _update_activity_summary(self):
         """Update the activity summary based on all sensor data."""
