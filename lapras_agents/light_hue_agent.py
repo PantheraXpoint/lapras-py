@@ -459,7 +459,7 @@ class LightHueAgent(VirtualAgent):
     def __turn_on_light(self):
         # Replace with your bridge IP and API username
         # NOTE(YH): hardcode for now
-        BRIDGE_IP = "143.248.56.213:10090"
+        BRIDGE_IP = "143.248.55.137:10090"
         USERNAME = "P2laHGvjzthn7Ip5-fAAIbVB9ulu9OlHWk8L7Yex"
         BASE_URL = f"http://{BRIDGE_IP}/api/{USERNAME}"
         # idx = self.agent_id.split("_")[-1]
@@ -485,7 +485,7 @@ class LightHueAgent(VirtualAgent):
     def __turn_off_light(self):
         # Replace with your bridge IP and API username
         # NOTE(YH): hardcode for now
-        BRIDGE_IP = "143.248.56.213:10090"
+        BRIDGE_IP = "143.248.55.137:10090"
         USERNAME = "P2laHGvjzthn7Ip5-fAAIbVB9ulu9OlHWk8L7Yex"
         BASE_URL = f"http://{BRIDGE_IP}/api/{USERNAME}"
         # idx = self.agent_id.split("_")[-1]

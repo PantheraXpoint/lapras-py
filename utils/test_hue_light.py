@@ -5,7 +5,7 @@ import sys
 
 
 # Replace with your bridge IP and API username
-BRIDGE_IP = "143.248.56.213:10090"
+BRIDGE_IP = "143.248.55.137:10090"
 USERNAME = "P2laHGvjzthn7Ip5-fAAIbVB9ulu9OlHWk8L7Yex"
 
 # Base API URL
@@ -96,7 +96,7 @@ def color_name_to_hue(color_name):
 if __name__ == "__main__":
     light_ids = get_light_ids()
     for light_id in light_ids:
-        turn_off_light(light_id)
+        turn_on_light(light_id)
         print(light_id)
 
 
