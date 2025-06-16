@@ -212,8 +212,9 @@ class EventFactory:
 
     @staticmethod
     def create_rules_command_event(
-        action: str,  # "load", "reload", "list", "clear"
+        action: str,  # "load", "reload", "list", "clear", "switch"
         rule_files: Optional[List[str]] = None,
+        preset_name: Optional[str] = None,
         source_entity_id: str = "Dashboard"
     ) -> Event:
         """Create a rulesCommand event for managing rules dynamically."""
@@ -221,7 +222,8 @@ class EventFactory:
             event=EventMetadata(
                 id="",
                 timestamp="",
-                type="rulesCommand"
+                type="rulesCommand",
+                priority="High"  # Rule changes are high priority
             ),
             source=EntityInfo(
                 entityType="dashboard",
@@ -229,7 +231,8 @@ class EventFactory:
             ),
             payload={
                 "action": action,
-                "rule_files": rule_files or []
+                "rule_files": rule_files or [],
+                "preset_name": preset_name  # Optional preset name for easier management
             }
         )
 
@@ -319,4 +322,42 @@ class TopicManager:
     @staticmethod
     def virtual_to_context_report(virtual_agent_id: str) -> str:
         """Topic for actionReport events from VirtualAgent to ContextManager (SYNCHRONOUS - Response)."""
-        return f"virtual/{virtual_agent_id}/to/context/actionReport" 
+        return f"virtual/{virtual_agent_id}/to/context/actionReport"
+
+    # DASHBOARD CONTROL TOPICS
+    @staticmethod
+    def dashboard_control_command() -> str:
+        """Topic for manual control commands from dashboard."""
+        return "dashboard/control/command"
+    
+    @staticmethod
+    def dashboard_control_result() -> str:
+        """Topic for dashboard control command results."""
+        return "dashboard/control/result"
+    
+    @staticmethod
+    def dashboard_context_state() -> str:
+        """Topic for publishing current system state to dashboard."""
+        return "dashboard/context/state"
+
+    # RULES MANAGEMENT TOPICS
+    @staticmethod
+    def rules_management_command() -> str:
+        """Topic for rules management commands."""
+        return "context/rules/command"
+    
+    @staticmethod
+    def rules_management_result() -> str:
+        """Topic for rules management command results."""
+        return "context/rules/result"
+
+    # SENSOR CONFIGURATION TOPICS
+    @staticmethod
+    def sensor_config_command(agent_id: str) -> str:
+        """Topic for sensor configuration commands for a specific agent."""
+        return f"agent/{agent_id}/sensorConfig"
+    
+    @staticmethod
+    def sensor_config_result(agent_id: str) -> str:
+        """Topic for sensor configuration command results."""
+        return f"agent/{agent_id}/sensorConfig/result" 

@@ -35,6 +35,29 @@ class ContextRuleManager:
         # Track loaded rule files to avoid duplicates
         self.loaded_rule_files: set = set()
         
+        # Define rule presets for easy switching
+        self.rule_presets = {
+            "hue_motion_only": ["lapras_middleware/rules/hue_motion.ttl"],
+            "hue_activity_only": ["lapras_middleware/rules/hue_activity.ttl"],
+            "hue_ir_only": ["lapras_middleware/rules/hue_ir.ttl"],
+            "hue_ir_motion": ["lapras_middleware/rules/hue_ir_motion.ttl"],
+            "hue_activity_motion": ["lapras_middleware/rules/hue_activity_motion.ttl"],
+            "hue_ir_activity": ["lapras_middleware/rules/hue_ir_activity.ttl"],
+            "hue_all_sensors": ["lapras_middleware/rules/hue_ir_activity_motion.ttl"],
+            "aircon_motion_only": ["lapras_middleware/rules/aircon_motion.ttl"],
+            "aircon_activity_only": ["lapras_middleware/rules/aircon_activity.ttl"],
+            "aircon_ir_only": ["lapras_middleware/rules/aircon_ir.ttl"],
+            "aircon_all_sensors": ["lapras_middleware/rules/aircon_ir_acitivity_motion.ttl"],
+            "both_devices_motion": [
+                "lapras_middleware/rules/hue_motion.ttl",
+                "lapras_middleware/rules/aircon_motion.ttl"
+            ],
+            "both_devices_all": [
+                "lapras_middleware/rules/hue_ir_activity_motion.ttl",
+                "lapras_middleware/rules/aircon_ir_acitivity_motion.ttl"
+            ]
+        }
+        
         # Track known virtual agents for dynamic topic subscription
         self.known_agents: set = set()
         
@@ -45,7 +68,7 @@ class ContextRuleManager:
         # Extended window logic for agents (15-second timing)
         self.extended_window_agents: Dict[str, Dict[str, Any]] = {}  # agent_id -> {start_time, duration, last_extend_time}
         self.extended_window_lock = threading.Lock()
-        self.EXTENDED_WINDOW_DURATION = 15.0  # 15 seconds
+        self.EXTENDED_WINDOW_DURATION = 60.0  # 60 seconds
         
         # Set up MQTT client with a unique client ID
         mqtt_client_id = f"{self.service_id}-{int(time.time()*1000)}"
@@ -786,9 +809,15 @@ class ContextRuleManager:
             logger.info(f"[{self.service_id}] Received rules management command: {event.event.id}")
             
             # Extract command details from payload
-            command_action = event.payload.get('action')  # "load", "unload", "reload", "list"
+            command_action = event.payload.get('action')  # "load", "unload", "reload", "list", "switch", "clear", "list_presets", "switch_preset"
             rule_files = event.payload.get('rule_files', [])  # list of rule file paths
+            preset_name = event.payload.get('preset_name')  # preset name for easier management
             command_id = event.event.id
+            
+            # If preset_name is provided, use preset files
+            if preset_name and preset_name in self.rule_presets:
+                rule_files = self.rule_presets[preset_name]
+                logger.info(f"[{self.service_id}] Using preset '{preset_name}': {rule_files}")
             
             success = False
             message = ""
@@ -821,9 +850,79 @@ class ContextRuleManager:
                 except Exception as e:
                     message = f"Error reloading rules: {str(e)}"
                     
+            elif command_action == "switch":
+                try:
+                    # Clear existing rules and reset extended window state
+                    old_files = list(self.loaded_rule_files)
+                    self.clear_rules()
+                    
+                    # Clear extended window state when switching rules
+                    with self.extended_window_lock:
+                        self.extended_window_agents.clear()
+                    
+                    # Load new rule files
+                    loaded_files = []
+                    for rule_file in rule_files:
+                        self.load_rules(rule_file)
+                        loaded_files.append(rule_file)
+                    success = True
+                    message = f"Successfully switched from {old_files} to {loaded_files}"
+                    logger.info(f"[{self.service_id}] RULE SWITCH: {old_files} → {loaded_files}")
+                except Exception as e:
+                    message = f"Error switching rules: {str(e)}"
+                    
+            elif command_action == "clear":
+                try:
+                    old_files = list(self.loaded_rule_files)
+                    self.clear_rules()
+                    
+                    # Clear extended window state when clearing rules
+                    with self.extended_window_lock:
+                        self.extended_window_agents.clear()
+                    
+                    success = True
+                    message = f"Successfully cleared {len(old_files)} rule files: {old_files}"
+                    logger.info(f"[{self.service_id}] RULES CLEARED: {old_files}")
+                except Exception as e:
+                    message = f"Error clearing rules: {str(e)}"
+                    
             elif command_action == "list":
                 success = True
                 message = f"Currently loaded rule files: {list(self.loaded_rule_files)}"
+                
+            elif command_action == "list_presets":
+                success = True
+                preset_info = []
+                for preset, files in self.rule_presets.items():
+                    preset_info.append(f"{preset}: {files}")
+                message = f"Available presets:\n" + "\n".join(preset_info)
+                
+            elif command_action == "switch_preset":
+                if not preset_name:
+                    message = "preset_name is required for switch_preset action"
+                elif preset_name not in self.rule_presets:
+                    message = f"Unknown preset '{preset_name}'. Available presets: {list(self.rule_presets.keys())}"
+                else:
+                    try:
+                        # Clear existing rules and reset extended window state
+                        old_files = list(self.loaded_rule_files)
+                        self.clear_rules()
+                        
+                        # Clear extended window state when switching rules
+                        with self.extended_window_lock:
+                            self.extended_window_agents.clear()
+                        
+                        # Load preset rule files
+                        preset_files = self.rule_presets[preset_name]
+                        loaded_files = []
+                        for rule_file in preset_files:
+                            self.load_rules(rule_file)
+                            loaded_files.append(rule_file)
+                        success = True
+                        message = f"Successfully switched to preset '{preset_name}': {loaded_files}"
+                        logger.info(f"[{self.service_id}] PRESET SWITCH: {old_files} → {preset_name} ({loaded_files})")
+                    except Exception as e:
+                        message = f"Error switching to preset '{preset_name}': {str(e)}"
                 
             else:
                 message = f"Unknown rules command action: {command_action}"
