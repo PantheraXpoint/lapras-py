@@ -1,0 +1,231 @@
+class MeetingRoomDesign:
+    # Use the IDs as written in the diagram
+    element_positions = {
+        # TV, temperature, Door
+        'TV Screen': (5, 0),
+        'temperature_3': (8, 0),  # Moved to the right
+        'door_01': (11, 10),  # Located at the center of the room entrance
+        # Light, Infrared (left center vertical line)
+        'light_1': (1, 5),
+        'infrared_5': (1, 8),
+        'infrared_6': (1, 6),
+        'infrared_7': (1, 4),
+        'infrared_8': (1, 2),
+        # Chairs (A row: left, B row: right, rows 2~6, 7B has same x as AC)
+        'activity_s2a': (3, 3),
+        'activity_s3a': (3, 4),
+        'activity_s4a': (3, 5),
+        'activity_s5a': (3, 6),
+        'activity_s6a': (3, 7),
+        'activity_s1b': (7, 2),
+        'activity_s2b': (7, 3),
+        'activity_s3b': (7, 4),
+        'activity_s4b': (7, 5),
+        'activity_s5b': (7, 6),
+        'activity_s6b': (7, 7),
+        'activity_s7b': (5, 8),  # Same x coordinate as AC (5)
+        # Motion
+        'motion_MW1': (1, 10),
+        'motion_01': (2, 3),
+        'motion_02': (2, 5),
+        'motion_03': (2, 7),
+        'motion_04': (4, 9),
+        'motion_05': (6, 9),
+        'motion_06': (8, 7),
+        'motion_07': (8, 5),
+        'motion_08': (8, 3),
+        'motion_MF1': (8, 1),
+        # infrared (right vertical line)
+        'infrared_1': (10, 8),
+        'infrared_2': (10, 6),
+        'infrared_3': (10, 4),
+        'infrared_4': (10, 2),
+        # AC
+        'AC A01': (5, 3),
+        'AC A02': (5, 6),
+    }
+    grid_size = 12  # 12x12 그리드
+    cell_w = 70
+    cell_h = 70
+    width = grid_size * cell_w
+    height = grid_size * cell_h
+
+    def __init__(self):
+        self.activity_color = "#4CAF50"
+        self.activity_empty_color = "#BDBDBD"
+        self.motion_color = "#FFE0B2"
+        self.infrared_color = "#FFB1C1"
+        self.temp_color = "#2196F3"
+        self.light_color = "#FFD600"
+        self.door_color = "#3F51B5"
+        self.tv_color = "#212121"
+        self.ac_color = "#00BCD4"
+
+    def generate_meeting_room_svg(self, sensors=None):
+        if sensors is None:
+            sensors = {}
+        # 1. 팝업 JS 함수 추가
+        popup_js = """
+        <script type="text/javascript">
+        function showSensorInfo(sensorId, sensorType, value, x, y) {
+            const existingPopup = document.getElementById('sensor-popup');
+            if (existingPopup) { existingPopup.remove(); }
+            const popup = document.createElement('div');
+            popup.id = 'sensor-popup';
+            popup.style.position = 'absolute';
+            popup.style.left = (x + 10) + 'px';
+            popup.style.top = (y + 10) + 'px';
+            popup.style.backgroundColor = 'white';
+            popup.style.border = '1px solid #ccc';
+            popup.style.borderRadius = '5px';
+            popup.style.padding = '10px';
+            popup.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+            popup.style.zIndex = '1000';
+            popup.style.maxWidth = '250px';
+            let valueDisplay = value;
+            if (sensorType === 'activity' || sensorType === 'motion' || sensorType === 'door') {
+               valueDisplay = value!=false ? '활성화됨' : '비활성화됨';
+            } else if (sensorType === 'temperature') {
+                valueDisplay = value + '°C';
+            }
+            popup.innerHTML = `
+                <div style="font-weight:bold;margin-bottom:5px;">센서 정보</div>
+                <div>ID: ${sensorId}</div>
+                <div>타입: ${sensorType}</div>
+                <div>값: ${valueDisplay}</div>
+                <div style="text-align:right;margin-top:5px;">
+                    <button onclick="document.getElementById('sensor-popup').remove();" 
+                    style="border:none;background:#f0f0f0;padding:3px 8px;border-radius:3px;cursor:pointer;">
+                    닫기</button>
+                </div>
+            `;
+            document.body.appendChild(popup);
+            var data = {message : "${sensorId}"};
+            window.parent.postMessage(data, '*');
+        }
+        </script>
+        """
+        svg = [popup_js]
+        svg.append(f'<svg width="{self.width}" height="{self.height}" style="border:1px solid #333;">')
+        # 방 테두리
+        svg.append(f'<rect x="0" y="0" width="{self.width}" height="{self.height}" fill="none" stroke="#000" stroke-width="4"/>')
+        # 요소 그리기
+        for eid, (gx, gy) in self.element_positions.items():
+            x = gx * self.cell_w + self.cell_w // 2
+            y = gy * self.cell_h + self.cell_h // 2
+
+            # 기존 라벨/타입 추론 코드
+            if eid.startswith('activity'):
+                label = 'Chair'
+                default_color = self.activity_color
+                sensor_type = 'activity'
+            elif eid.startswith('motion'):
+                label = 'Mot'
+                default_color = self.motion_color
+                sensor_type = 'motion'
+            elif eid.startswith('infrared'):
+                label = 'Ir'
+                default_color = self.infrared_color
+                sensor_type = 'infrared'
+            elif eid.startswith('temperature'):
+                label = 'Tem'
+                default_color = self.temp_color
+                sensor_type = 'temperature'
+            elif eid.startswith('light'):
+                label = 'Light'
+                default_color = self.light_color
+                sensor_type = 'light'
+            elif eid.startswith('door'):
+                label = 'Door'
+                default_color = self.door_color
+                sensor_type = 'door'
+            elif eid.startswith('TV'):
+                label = 'TV'
+                default_color = self.tv_color
+                sensor_type = 'tv'
+            elif eid.startswith('AC'):
+                label = 'AC'
+                default_color = self.ac_color
+                sensor_type = 'ac'
+            else:
+                label = eid
+                default_color = "#888"
+                sensor_type = 'unknown'
+
+            # 센서 값 추출
+            value = None
+            if sensors and eid in sensors:
+                value = sensors[eid].get('value')
+                sensor_type = sensors[eid].get('sensor_type', sensor_type)
+            else: 
+                value = None
+                sensor_type = "준비 중"
+            # 색상만 동적으로 결정
+            color = default_color
+            if value is not None:
+                if sensor_type == 'activity':
+                    color = "#4CAF50" if value else "#BDBDBD"
+                elif sensor_type == 'motion':
+                    color = "#FF9800" if value else "#FFE0B2"
+                elif sensor_type == 'infrared':
+                    if value is not None and value <150:
+                        color = "#FF0000"  # 진한 빨간색
+                    else:
+                        color = "#FFB1C1"
+                elif sensor_type == 'temperature':
+                    if value is not None and value >= 25:
+                        color = "#F44336"
+                    else:
+                        color = "#2196F3"
+                elif sensor_type == 'light':
+                    color = "#FFD600" if value else "#FFF9C4"
+                elif sensor_type == 'door':
+                    door_width = 40
+                    door_height = 5
+                    if value:  # 열린 문
+                        svg.append(
+                            f'<line x1="{x}" y1="{y}" x2="{x}" y2="{y + door_width}" ' +
+
+                            f'stroke="#3F51B5" stroke-width="{door_height}" ' +
+                            f'onclick="{onclick}" ' +
+                            f'style="cursor:pointer;" />'
+                        )
+                        value="열림"
+                    else:  # 닫힌 문
+                        svg.append(
+                            f'<line x1="{x}" y1="{y}" x2="{x - door_width}" y2="{y}" ' +
+                            f'stroke="#3F51B5" stroke-width="{door_height}" ' +
+                            f'onclick="{onclick}" ' +
+                            f'style="cursor:pointer;" />'
+                        )
+                        value="닫힘"
+                    # 문 라벨
+                    svg.append(f'<text x="{x - 5}" y="{y - 10}" fill="#333333" font-size="10" text-anchor="end">{label} ({value})</text>')
+            else:
+                print("나머지", eid, color, sensor_type, value)
+            # 클릭 이벤트: showSensorInfo 호출 (SVG 내에서 JS로 전달)
+            onclick = f"showSensorInfo('{eid}', '{sensor_type}', {str(value).lower() if value is not None else 'null'}, event.clientX, event.clientY)"
+
+            if eid.startswith('activity'):
+                svg.append(f'<circle cx="{x}" cy="{y}" r="28" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"></circle>')
+                svg.append(f'<text x="{x}" y="{y+5}" font-size="15" text-anchor="middle" fill="#fff">{label}</text>')
+            elif eid.startswith('motion'):
+                svg.append(f'<rect x="{x-18}" y="{y-18}" width="36" height="36" rx="8" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
+                svg.append(f'<text x="{x}" y="{y+5}" font-size="14" text-anchor="middle" fill="#fff">{label}</text>')
+            elif eid.startswith('infrared'):
+                svg.append(f'<ellipse cx="{x}" cy="{y}" rx="20" ry="14" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
+                svg.append(f'<text x="{x}" y="{y+5}" font-size="14" text-anchor="middle" fill="#fff">{label}</text>')
+            elif eid.startswith('temperature'):
+                svg.append(f'<rect x="{x-22}" y="{y-22}" width="44" height="44" rx="10" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
+                svg.append(f'<text x="{x}" y="{y+7}" font-size="14" text-anchor="middle" fill="#fff">{label}</text>')
+            elif eid.startswith('light'):
+                svg.append(f'<circle cx="{x}" cy="{y}" r="18" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
+                svg.append(f'<text x="{x}" y="{y+5}" font-size="14" text-anchor="middle" fill="#222">{label}</text>')
+            elif eid.startswith('TV'):
+                svg.append(f'<rect x="{x-50}" y="{y-22}" width="100" height="44" rx="8" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
+                svg.append(f'<text x="{x}" y="{y+8}" font-size="16" text-anchor="middle" fill="#fff">{label}</text>')
+            elif eid.startswith('AC'):
+                svg.append(f'<rect x="{x-35}" y="{y-35}" width="70" height="70" rx="16" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
+                svg.append(f'<text x="{x}" y="{y+10}" font-size="18" text-anchor="middle" fill="#fff">{label}</text>')
+        svg.append('</svg>')
+        return ''.join(svg)

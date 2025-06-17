@@ -70,6 +70,11 @@ class ContextRuleManager:
         self.extended_window_lock = threading.Lock()
         self.EXTENDED_WINDOW_DURATION = 60.0  # 60 seconds
         
+        # Manual override tracking - NEW
+        self.manual_override_agents: Dict[str, float] = {}  # agent_id -> override_expiry_time
+        self.manual_override_lock = threading.Lock()
+        self.MANUAL_OVERRIDE_DURATION = 300.0  # 300 seconds override after manual command
+        
         # Set up MQTT client with a unique client ID and clean session
         mqtt_client_id = f"{self.service_id}-{int(time.time()*1000)}-{uuid.uuid4().hex[:8]}"
         self.mqtt_client = mqtt.Client(client_id=mqtt_client_id, clean_session=True)
@@ -256,8 +261,21 @@ class ContextRuleManager:
             action_message = MQTTMessage.serialize(action_event)
             publish_result = self.mqtt_client.publish(action_topic, action_message, qos=1)
             
+            # Check if publish was successful
+            if publish_result.rc != mqtt.MQTT_ERR_SUCCESS:
+                logger.error(f"[{self.service_id}] Failed to publish action command to {agent_id}. Return code: {publish_result.rc}")
+                self._publish_dashboard_command_result(command_id, False, f"Failed to send command to {agent_id}", agent_id)
+                return
+            
+            # Record manual override - NEW
+            with self.manual_override_lock:
+                self.manual_override_agents[agent_id] = time.time() + self.MANUAL_OVERRIDE_DURATION
+            
             # Log the dashboard command for audit trail
             logger.info(f"[{self.service_id}] DASHBOARD COMMAND sent to {agent_id}: {action_name}")
+            logger.info(f"[{self.service_id}] Action topic: {action_topic}")
+            logger.info(f"[{self.service_id}] Action event ID: {action_event.event.id}")
+            logger.info(f"[{self.service_id}] Manual override active for {self.MANUAL_OVERRIDE_DURATION}s")
             if parameters:
                 logger.info(f"[{self.service_id}] Command parameters: {parameters}")
             logger.info(f"[{self.service_id}] Command ID: {action_event.event.id}, Priority: {priority}")
@@ -265,7 +283,7 @@ class ContextRuleManager:
             # Publish success result back to dashboard
             self._publish_dashboard_command_result(
                 command_id, True, 
-                f"Command '{action_name}' sent to {agent_id}", 
+                f"Command '{action_name}' sent to {agent_id} on topic {action_topic}", 
                 agent_id, action_event.event.id
             )
             
@@ -314,16 +332,38 @@ class ContextRuleManager:
             context_payload = MQTTMessage.get_payload_as(event, ContextPayload)
             agent_id = event.source.entityId
             
+            # Check manual override status - NEW
+            manual_override_active = False
+            with self.manual_override_lock:
+                override_expiry = self.manual_override_agents.get(agent_id)
+                if override_expiry and time.time() < override_expiry:
+                    manual_override_active = True
+                    remaining_time = override_expiry - time.time()
+                    logger.info(f"[{self.service_id}] Manual override active for '{agent_id}' ({remaining_time:.1f}s remaining)")
+                elif override_expiry and time.time() >= override_expiry:
+                    # Override expired, remove it
+                    del self.manual_override_agents[agent_id]
+                    logger.info(f"[{self.service_id}] Manual override expired for '{agent_id}' - automatic rules now resume")
+            
             # Update context map
             with self.context_lock:
+                new_state = context_payload.state.copy()
+                
+                # During manual override, allow all state changes to come through
+                # This ensures manual commands are properly reflected in the system state
+                if manual_override_active:
+                    logger.info(f"[{self.service_id}] Manual override active for '{agent_id}' - accepting state update as-is: {new_state.get('power', 'unknown')}")
+                else:
+                    logger.debug(f"[{self.service_id}] No manual override for '{agent_id}' - normal state update")
+                
                 self.context_map[agent_id] = {
-                    "state": context_payload.state,
+                    "state": new_state,
                     "agent_type": context_payload.agent_type,
                     "sensors": context_payload.sensors,
                     "timestamp": event.event.timestamp,
                     "last_update": time.time()
                 }
-                logger.info(f"[{self.service_id}] Updated context for agent {agent_id}, context payload {context_payload.state}")
+                logger.info(f"[{self.service_id}] Updated context for agent {agent_id}, context payload {new_state}")
                 logger.debug(f"[{self.service_id}] Current context map: {json.dumps(self.context_map, indent=2)}")
             
             # Track this agent for future action commands
@@ -332,8 +372,8 @@ class ContextRuleManager:
             # Publish updated dashboard state
             self._publish_dashboard_state_update()
             
-            # Immediately apply rules for this agent
-            self._apply_rules_for_agent(agent_id, context_payload.state, event.event.timestamp)
+            # Immediately apply rules for this agent (will be skipped during override)
+            self._apply_rules_for_agent(agent_id, new_state, event.event.timestamp)
             
         except Exception as e:
             logger.error(f"[{self.service_id}] Error handling context update: {e}", exc_info=True)
@@ -404,8 +444,20 @@ class ContextRuleManager:
             logger.error(f"[{self.service_id}] Error handling action report: {e}", exc_info=True)
 
     def _apply_rules_for_agent(self, agent_id: str, current_state: Dict[str, Any], timestamp: Any):
-        """Apply rules for a specific agent with 15-second extended window logic."""
+        """Apply rules for a specific agent with manual override check."""
         try:
+            # Check for manual override - NEW
+            with self.manual_override_lock:
+                override_expiry = self.manual_override_agents.get(agent_id)
+                if override_expiry and time.time() < override_expiry:
+                    remaining_time = override_expiry - time.time()
+                    logger.info(f"[{self.service_id}] Skipping rules for '{agent_id}' - manual override active ({remaining_time:.1f}s remaining)")
+                    return
+                elif override_expiry and time.time() >= override_expiry:
+                    # Override expired, remove it
+                    del self.manual_override_agents[agent_id]
+                    logger.info(f"[{self.service_id}] Manual override expired for '{agent_id}' - automatic rules now resume")
+            
             logger.debug(f"[{self.service_id}] Processing rules for agent '{agent_id}' (state updated)")
             logger.debug(f"[{self.service_id}] Current state for '{agent_id}': {json.dumps(current_state, indent=2)}")
             
@@ -422,22 +474,21 @@ class ContextRuleManager:
             
             logger.info(f"[{self.service_id}] Raw rule decision for '{agent_id}': power={raw_power_decision}")
             
-            # Apply extended window logic
-            final_decision = self._apply_extended_window_logic(agent_id, current_power_state, raw_power_decision)
-            
-            if final_decision != current_power_state:
-                logger.info(f"[{self.service_id}] Final decision for '{agent_id}': {current_power_state} → {final_decision}")
+            if raw_power_decision != current_power_state:
+                logger.info(f"[{self.service_id}] Rule decision for '{agent_id}': {current_power_state} → {raw_power_decision}")
                 
-                # Send action command based on final decision
-                if final_decision == "on":
+                # Send action command based on decision
+                if raw_power_decision == "on":
                     self._send_action_command(agent_id, "turn_on")
-                elif final_decision == "off":
+                elif raw_power_decision == "off":
                     self._send_action_command(agent_id, "turn_off")
             else:
                 logger.debug(f"[{self.service_id}] No state change needed for agent '{agent_id}' (already {current_power_state})")
                 
         except Exception as e:
             logger.error(f"[{self.service_id}] Error applying rules for agent '{agent_id}': {e}", exc_info=True)
+
+
 
     def _apply_extended_window_logic(self, agent_id: str, current_power: str, raw_rule_decision: str) -> str:
         """
@@ -577,6 +628,8 @@ class ContextRuleManager:
             
         except Exception as e:
             logger.error(f"[{self.service_id}] Error sending action command to {agent_id}: {e}", exc_info=True)
+
+
 
     def evaluate_rules(self, agent_id: str, current_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
