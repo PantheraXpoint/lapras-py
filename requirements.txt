@@ -7,10 +7,11 @@ typing-extensions>=4.0.0  # For enhanced type hints
 structlog>=23.0.0  # For structured logging
 prometheus-client>=0.17.0  # For metrics collection
 
-# Dashboard and UI
+# Dashboard and DB
 streamlit>=1.45.1
 streamlit-autorefresh>=1.0.1
 streamlit-bridge>=1.1.8
+pymongo>=4.13.2
 
 # Testing
 pytest>=7.0.0
