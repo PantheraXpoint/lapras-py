@@ -1,5 +1,7 @@
 import os
 import sys
+import time
+
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
@@ -7,7 +9,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from utils.new_dashboard_subscriber import EnhancedDashboardSubscriber
 
 def get_config():
-    # load dotenv in ../.env and read the configuration
     load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
     config = {
         'mongo': {
@@ -21,12 +22,7 @@ def get_config():
     return config
 
 
-def get_event_db():
-    """
-    Get the MongoDB client and database for event storage.
-    """
-    config = get_config()
-
+def get_event_db(config):
     try:
         client = MongoClient(
             config['mongo']['uri'],
@@ -47,12 +43,47 @@ def get_event_db():
         raise RuntimeError(f"An unknown error occurred while connecting to MongoDB: {e}")
 
 if __name__ == "__main__":
+    config = get_config()
     try:
-        db = get_event_db()
+        db = get_event_db(config)
         print("Successfully connected to the event database.")
     except Exception as e:
         print(f"Error: {e}")
         exit(1)
+    # Create the client object before connecting to the broker
+    client = EnhancedDashboardSubscriber()
+    client.mqtt_client.subscribe("dashboard/control/result", qos=1)
+    client.mqtt_client.loop_start()
+    print("MQTT client started and subscribed to 'dashboard/control/result'.")
+    last_timestamps = {}
+    while True:
+        # Keep the script running to maintain the MQTT connection and store Data in the database
+        data = client.get_all_sensors()
+        for sensor_name, sensor_data in data.items():
+            # Check if the sensor data has been updated since the last timestamp
+            last_update = sensor_data.get("last_update")
+            if not last_update:
+                continue
+            if sensor_name in last_timestamps and last_update <= last_timestamps[sensor_name]:
+                    continue
+            last_timestamps[sensor_name] = last_update
+            collection = db[sensor_name]
+            metadata = sensor_data.get("metadata", {}).copy()
+            for key in ["sensor_name", "sensor_id", "last_communication"]:
+                metadata.pop(key, None)
+            document = {
+                "value": sensor_data.get("value"),
+                "metadata": metadata,
+                "timestamp": last_update # stored as float
+            }
+            # Ensure the collection exists and has the TTL index
+            if 'timestamp' not in collection.index_information():
+                collection.create_index("timestamp", expireAfterSeconds=config['mongo']['ttl'])
 
-    subscriber = EnhancedDashboardSubscriber()
-    subscriber.start()
+            try:
+                collection.insert_one(document)
+            except Exception as e:
+                print(f"Error inserting data into {sensor_name} collection: {e}")
+                continue
+        time.sleep(1)
+
