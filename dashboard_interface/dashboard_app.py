@@ -1,7 +1,9 @@
-from new_dashboard_subscriber import EnhancedDashboardSubscriber as eds
+import os
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from utils.new_dashboard_subscriber import EnhancedDashboardSubscriber as eds
 from design import MeetingRoomDesign
 import time # May be required by DashboardClient or Streamlit app
-import random
 import streamlit as st
 from st_bridge import bridge
 
@@ -16,11 +18,6 @@ def main():
 
             # Create the client object before connecting to the broker
             client = eds(mqtt_broker=mqtt_broker, mqtt_port=mqtt_port)
-
-            # Debug: Check if Streamlit object is passed correctly
-            print(f"Type of st object passed from dashboard_app.py: {type(st)}")
-            print(f"st.rerun method exists: {hasattr(st, 'rerun')}")
-            print(f"st.session_state exists: {hasattr(st, 'session_state')}")
 
             # Set Streamlit instance explicitly (additional validation)
             try:
@@ -128,217 +125,38 @@ def main():
                 if command_id:
                     st.toast("Turned off", icon="✅")
 
-        # # Test Mode section - changed to collapsible expander
-        # with st.expander("테스트 모드 (개발용)", expanded=False):
-        #     # 테스트 모드 토글
-        #     test_mode = st.checkbox("테스트 모드 활성화", value=st.session_state.test_mode)
-        #     st.session_state.test_mode = test_mode
-        #
-        #     if test_mode:
-        #         # 의자 테스트 데이터를 표시하는 작은 UI
-        #         st.warning("⚠️ 테스트 모드 활성화됨 - 실제 센서 데이터가 아닌 테스트 데이터가 표시됩니다.")
-        #
-        #         # 탭으로 센서 종류별 제어 UI 구성
-        #         sensor_tabs = st.tabs(["의자 센서", "문 센서", "모션 센서", "IR 센서", "온도 센서", "조명 센서"])
-        #
-        #         # 의자 센서 탭
-        #         with sensor_tabs[0]:
-        #             st.subheader("의자 센서 제어")
-        #             # 3개의 열로 의자 컨트롤 표시
-        #             chair_cols = st.columns(3)
-        #
-        #             for i, sensor_id in enumerate(st.session_state.room_designer.element_positions.keys()):
-        #                 if not sensor_id.startswith('activity'):
-        #                     continue
-        #                 # 3개 열로 의자 컨트롤 배치
-        #                 col = chair_cols[i % 3]
-        #                 with col:
-        #                     # 체크박스로 각 의자의 점유 상태 제어
-        #                     is_occupied = st.checkbox(
-        #                         f"의자 {sensor_id}",
-        #                         value=st.session_state.test_sensors.get(sensor_id, {'value': False})['value'],
-        #                         key=f"chair_test_{sensor_id}"
-        #                     )
-        #                     st.session_state.test_sensors[sensor_id]['value'] = is_occupied
-        #
-        #         # 문 센서 탭
-        #         with sensor_tabs[1]:
-        #             st.subheader("문 센서 제어")
-        #             door_cols = st.columns(2)  # 2열로 나누어 표시
-        #             for i, sensor_id in enumerate(st.session_state.room_designer.element_positions.keys()):
-        #                 if not sensor_id.startswith('door'):
-        #                     continue
-        #                 col = door_cols[i % 2]
-        #                 with col:
-        #                     is_open = st.checkbox(
-        #                         f"문 {sensor_id} (열림/닫힘)",
-        #                         value=st.session_state.test_sensors.get(sensor_id, {'value': False})['value'],
-        #                         key=f"door_test_{sensor_id}"
-        #                     )
-        #                     st.session_state.test_sensors[sensor_id]['value'] = is_open
-        #
-        #         # 모션 센서 탭
-        #         with sensor_tabs[2]:
-        #             st.subheader("모션 센서 제어")
-        #             motion_cols = st.columns(2)
-        #
-        #             for i, sensor_id in enumerate(st.session_state.room_designer.element_positions.keys()):
-        #                 if not sensor_id.startswith('motion'):
-        #                     continue
-        #                 col = motion_cols[i % 2]
-        #                 with col:
-        #                     is_active = st.checkbox(
-        #                         f"모션 {sensor_id}",
-        #                         value=st.session_state.test_sensors.get(sensor_id, {'value': False})['value'],
-        #                         key=f"motion_test_{sensor_id}"
-        #                     )
-        #                     st.session_state.test_sensors[sensor_id]['value'] = is_active
-        #
-        #         # IR 센서 탭
-        #         with sensor_tabs[3]:
-        #             st.subheader("IR 센서 제어")
-        #             for sensor_id in st.session_state.room_designer.element_positions.keys():
-        #                 if not sensor_id.startswith('infrared'):
-        #                     continue
-        #                 ir_value = st.slider(
-        #                     f"IR {sensor_id}",
-        #                     min_value=0,
-        #                     max_value=200,
-        #                     value=int(st.session_state.test_sensors.get(sensor_id, {'value': 0})['value']),
-        #                     step=1,
-        #                     key=f"ir_test_{sensor_id}"
-        #                 )
-        #                 st.session_state.test_sensors[sensor_id]['value'] = ir_value
-        #
-        #         # 온도 센서 탭
-        #         with sensor_tabs[4]:
-        #             st.subheader("온도 센서 제어")
-        #             for sensor_id in st.session_state.room_designer.element_positions.keys():
-        #                 if not sensor_id.startswith('temperature'):
-        #                     continue
-        #                 temp_value = st.slider(
-        #                     f"온도 {sensor_id} (°C)",
-        #                     min_value=15.0,
-        #                     max_value=30.0,
-        #                     value=st.session_state.test_sensors.get(sensor_id, {'value': 22.0})['value'],
-        #                     step=0.5,
-        #                     key=f"temp_test_{sensor_id}"
-        #                 )
-        #                 st.session_state.test_sensors[sensor_id]['value'] = temp_value
-        #
-        #         # 조명 센서 탭
-        #         with sensor_tabs[5]:
-        #             st.subheader("조명 센서")
-        #             for sensor_id in st.session_state.room_designer.element_positions.keys():
-        #                 if not sensor_id.startswith('light'):
-        #                     continue
-        #                 light_value = st.slider("조명 값", 0, 100, 50, key=f"light_{sensor_id}")
-        #                 st.write(f"현재 값: {light_value}")
-        #                 st.session_state.test_sensors[sensor_id]['value'] = light_value
-        #
-        # # 랜덤화 버튼 섹션
-        # with st.expander("랜덤 데이터 생성", expanded=False):
-        #     col1, col2 = st.columns(2)
-        #
-        #     with col1:
-        #         if st.button("모든 센서 랜덤화", use_container_width=True):
-        #             for sensor_id, sensor_info in st.session_state.test_sensors.items():
-        #                 sensor_type = sensor_info.get('sensor_type')
-        #                 if sensor_type == 'activity' or sensor_type == 'door' or sensor_type == 'motion':
-        #                     st.session_state.test_sensors[sensor_id]['value'] = random.choice([True, False])
-        #                 elif sensor_type == 'infrared':
-        #                     st.session_state.test_sensors[sensor_id]['value'] = random.randint(0, 200)
-        #                 elif sensor_type == 'temperature':
-        #                     st.session_state.test_sensors[sensor_id]['value'] = round(random.uniform(15.0, 30.0), 1)
-        #             st.rerun()
-        #
-        #     with col2:
-        #         if st.button("모든 센서 초기화", use_container_width=True):
-        #             for sensor_id, sensor_info in st.session_state.test_sensors.items():
-        #                 sensor_type = sensor_info.get('sensor_type')
-        #                 if sensor_type == 'activity' or sensor_type == 'door' or sensor_type == 'motion':
-        #                     st.session_state.test_sensors[sensor_id]['value'] = False
-        #                 elif sensor_type == 'infrared':
-        #                     st.session_state.test_sensors[sensor_id]['value'] = 0
-        #                 elif sensor_type == 'temperature':
-        #                     st.session_state.test_sensors[sensor_id]['value'] = 22.0
-        #             st.rerun()
-
-    # # --- Main Content Area ---
-    # with main_content_col:
-    #     # Debug - view all sensors
-    #     # with st.expander("All Sensor Data", expanded=False):
-    #     #     st.json(all_sensors)
-    #
-    #     chair_occupancy_data = {}  # Map of occupancy status for SVG function
-    #
-    #     # Use test data if in test mode
-    #     if st.session_state.test_mode:
-    #         chair_occupancy_data = st.session_state.test_sensors
-    #
-    #         # Show a small UI indicating test data is being used
-    #         st.warning("⚠️ Test mode enabled - displaying test data instead of real sensor data.")
-    #
-    #         # Generate and display test SVG
-    #         meeting_room_svg = designer.generate_meeting_room_svg(
-    #             sensors=st.session_state.test_sensors
-    #         )
-    #         st.components.v1.html(meeting_room_svg, height=1000, scrolling=False)
-    #
-    #     elif client is None:
-    #         st.warning("Cannot display meeting room status because the MQTT client is not connected.")
-    #     elif all_sensors:
-    #         designer = st.session_state.room_designer
-    #         # Display number of occupied chairs
-    #         occupied_chairs = sum(1 for status in chair_occupancy_data.values() if status)
-    #         # total_chairs = len(designer.ordered_chair_sensor_ids)
-    #         # st.info(f"Current meeting room status: {occupied_chairs} chairs occupied out of {total_chairs}")
-    #
-    #         # Generate and display SVG (using components.html to enable JavaScript)
-    #         meeting_room_svg = designer.generate_meeting_room_svg(
-    #             sensors=all_sensors
-    #         )
-    #         st.components.v1.html(meeting_room_svg, height=1000, scrolling=False)
-
     clicked_sensor = bridge("sensor-id-bridge", default="")
+    last_svg = "";
     if clicked_sensor:
         st.write(f"Clicked sensor ID: {clicked_sensor}")
+
     while True:
         all_sensors = client.get_all_sensors() if client else {}
         main_content_col.empty() # Clear the main content area before redrawing
         if all_sensors:
             meeting_room_svg = designer.generate_meeting_room_svg(sensors=all_sensors)
-            with main_content_col:
-                st.components.v1.html(meeting_room_svg, height=1000, scrolling=False)
+            if meeting_room_svg != last_svg:  # Only update if SVG has changed
+                last_svg = meeting_room_svg
+                with main_content_col:
+                    st.components.v1.html(meeting_room_svg, height=1000, scrolling=False)
         else:  # If there is no sensor data
             with main_content_col:
                 st.info("Waiting to receive meeting room status information...")
-
-
-
 
         time.sleep(5)
 
 if __name__ == "__main__":
     st.set_page_config(page_title="Live IoT Dashboard", layout="wide")
-    #count = st_autorefresh(interval=1000, limit=None, key="autorefresh")
-    #st.markdown(
-    #    f"<div style='position: fixed; bottom: 10px; right: 10px; font-size: 12px; color: #666;'>Auto-refreshed {count} times</div>",
-    #    unsafe_allow_html=True)
-    # Must be placed as the first Streamlit command
     st.title("Live IoT Dashboard - Real-time Updates")
     client = None
     if 'room_designer' not in st.session_state:
         st.session_state.room_designer = MeetingRoomDesign()
-    # Initialize test mode related variables (disabled by default)
     if 'test_mode' not in st.session_state:
         st.session_state.test_mode = False
 
         if 'test_sensors' not in st.session_state:
-            # Initialize with all sensors disabled by default
             st.session_state.test_sensors = {}
 
-            # Initialize based on all sensor IDs in element_positions
             for sensor_id in st.session_state.room_designer.element_positions.keys():
                 if sensor_id.startswith('activity'):
                     st.session_state.test_sensors[sensor_id] = {'value': False, 'sensor_type': 'activity'}
@@ -352,10 +170,6 @@ if __name__ == "__main__":
                     st.session_state.test_sensors[sensor_id] = {'value': 22.0, 'sensor_type': 'temperature'}
                 elif sensor_id.startswith('light'):
                     st.session_state.test_sensors[sensor_id] = {'value': 50, 'sensor_type': 'light'}
-
-    # (Optional) Force rerun button (for debugging)
-    # if st.button("Rerun"):
-    #     st.rerun()
 
     main()
 
