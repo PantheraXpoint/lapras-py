@@ -66,12 +66,12 @@ class RuleAgent:
             logger.info(f"[{self.service_id}] Successfully connected to MQTT broker.")
             
             # Subscribe to dashboard rule management requests
-            dashboard_rules_topic = "dashboard/rules/request"
+            dashboard_rules_topic = TopicManager.dashboard_rules_request()
             result1 = self.mqtt_client.subscribe(dashboard_rules_topic, qos=1)
             logger.info(f"[{self.service_id}] Subscribed to {dashboard_rules_topic} (result: {result1})")
             
             # Subscribe to rule management results to forward back to dashboard
-            rules_result_topic = "context/rules/result" 
+            rules_result_topic = TopicManager.rules_management_result()
             result2 = self.mqtt_client.subscribe(rules_result_topic, qos=1)
             logger.info(f"[{self.service_id}] Subscribed to {rules_result_topic} (result: {result2})")
             
@@ -83,9 +83,9 @@ class RuleAgent:
         logger.debug(f"[{self.service_id}] Message received on topic '{msg.topic}'")
         
         try:
-            if msg.topic == "dashboard/rules/request":
+            if msg.topic == TopicManager.dashboard_rules_request():
                 self._handle_dashboard_rules_request(msg.payload.decode())
-            elif msg.topic == "context/rules/result":
+            elif msg.topic == TopicManager.rules_management_result():
                 self._handle_rules_result(msg.payload.decode())
             else:
                 logger.warning(f"[{self.service_id}] Unexpected topic: {msg.topic}")
@@ -226,26 +226,16 @@ class RuleAgent:
     def _send_dashboard_rules_response(self, command_id: str, success: bool, message: str, dashboard_id: str, action: str):
         """Send response back to dashboard."""
         try:
-            response_event = Event(
-                event=EventMetadata(
-                    id="",  # Auto-generated
-                    timestamp="",  # Auto-generated
-                    type="dashboardRulesResponse"
-                ),
-                source=EntityInfo(
-                    entityType="ruleAgent", 
-                    entityId=self.service_id
-                ),
-                payload={
-                    "command_id": command_id,
-                    "success": success,
-                    "message": message,
-                    "action": action,
-                    "dashboard_id": dashboard_id
-                }
+            response_event = EventFactory.create_dashboard_rules_response_event(
+                command_id=command_id,
+                success=success,
+                message=message,
+                action=action,
+                dashboard_id=dashboard_id,
+                source_entity_id=self.service_id
             )
             
-            response_topic = "dashboard/rules/response"
+            response_topic = TopicManager.dashboard_rules_response()
             response_message = MQTTMessage.serialize(response_event)
             self.mqtt_client.publish(response_topic, response_message, qos=1)
             

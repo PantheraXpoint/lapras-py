@@ -118,14 +118,12 @@ class ContextRuleManager:
             logger.info(f"[{self.service_id}] Subscribed to topic pattern: {report_topic_pattern} (result: {result2})")
             
             # Subscribe to dashboard manual control commands
-            # Topic: dashboard/control/command
-            dashboard_control_topic = "dashboard/control/command"
+            dashboard_control_topic = TopicManager.dashboard_control_command()
             result3 = self.mqtt_client.subscribe(dashboard_control_topic, qos=1)
             logger.info(f"[{self.service_id}] Subscribed to dashboard control topic: {dashboard_control_topic} (result: {result3})")
             
             # Subscribe to rules management commands
-            # Topic: context/rules/command
-            rules_management_topic = "context/rules/command"
+            rules_management_topic = TopicManager.rules_management_command()
             result4 = self.mqtt_client.subscribe(rules_management_topic, qos=1)
             logger.info(f"[{self.service_id}] Subscribed to rules management topic: {rules_management_topic} (result: {result4})")
             
@@ -161,13 +159,13 @@ class ContextRuleManager:
         
         try:
             # Check if it's a dashboard control command
-            if msg.topic == "dashboard/control/command":
+            if msg.topic == TopicManager.dashboard_control_command():
                 logger.info(f"[{self.service_id}] DEBUG: Processing dashboard control command")
                 self._handle_dashboard_control_command(msg.payload.decode())
                 return
             
             # Check if it's a rules management command
-            if msg.topic == "context/rules/command":
+            if msg.topic == TopicManager.rules_management_command():
                 logger.info(f"[{self.service_id}] DEBUG: Processing rules management command")
                 logger.debug(f"[{self.service_id}] Full rules command payload: {msg.payload.decode()}")
                 try:
@@ -298,26 +296,15 @@ class ContextRuleManager:
         """Publish command result back to dashboard via MQTT using Event structure."""
         try:
             # Create Event structure for command result
-            result_event = Event(
-                event=EventMetadata(
-                    id="",  # Auto-generated
-                    timestamp="",  # Auto-generated  
-                    type="dashboardCommandResult"
-                ),
-                source=EntityInfo(
-                    entityType="contextManager",
-                    entityId="CM-MainController"
-                ),
-                payload={
-                    "command_id": command_id,
-                    "success": success,
-                    "message": message,
-                    "agent_id": agent_id,
-                    "action_event_id": action_event_id
-                }
+            result_event = EventFactory.create_dashboard_command_result_event(
+                command_id=command_id,
+                success=success,
+                message=message,
+                agent_id=agent_id,
+                action_event_id=action_event_id
             )
             
-            result_topic = "dashboard/control/result"
+            result_topic = TopicManager.dashboard_control_result()
             result_message = MQTTMessage.serialize(result_event)
             self.mqtt_client.publish(result_topic, result_message, qos=1)
             
@@ -382,30 +369,10 @@ class ContextRuleManager:
         """Publish current system state to dashboard via MQTT using Event structure."""
         try:
             with self.context_lock:
-                # Create Event structure for dashboard state
-                dashboard_state_event = Event(
-                    event=EventMetadata(
-                        id="",  # Auto-generated
-                        timestamp="",  # Auto-generated
-                        type="dashboardStateUpdate"
-                    ),
-                    source=EntityInfo(
-                        entityType="contextManager",
-                        entityId="CM-MainController"
-                    ),
-                    payload={
-                        "agents": {},
-                        "summary": {
-                            "total_agents": len(self.context_map),
-                            "known_agents": list(self.known_agents),
-                            "last_update": time.time()
-                        }
-                    }
-                )
-                
-                # Add agent states to payload
+                # Prepare agents data
+                agents_data = {}
                 for agent_id, agent_data in self.context_map.items():
-                    dashboard_state_event.payload["agents"][agent_id] = {
+                    agents_data[agent_id] = {
                         "state": agent_data["state"],
                         "agent_type": agent_data["agent_type"], 
                         "sensors": agent_data["sensors"],
@@ -413,9 +380,22 @@ class ContextRuleManager:
                         "last_update": agent_data["last_update"],
                         "is_responsive": (time.time() - agent_data["last_update"]) < 300  # 5 minute timeout
                     }
+                
+                # Prepare summary data
+                summary_data = {
+                    "total_agents": len(self.context_map),
+                    "known_agents": list(self.known_agents),
+                    "last_update": time.time()
+                }
+                
+                # Create Event structure for dashboard state
+                dashboard_state_event = EventFactory.create_dashboard_state_update_event(
+                    agents=agents_data,
+                    summary=summary_data
+                )
             
             # Publish using Event structure
-            dashboard_topic = "dashboard/context/state"
+            dashboard_topic = TopicManager.dashboard_context_state()
             dashboard_message = MQTTMessage.serialize(dashboard_state_event)
             self.mqtt_client.publish(dashboard_topic, dashboard_message, qos=1)
             
@@ -487,8 +467,6 @@ class ContextRuleManager:
                 
         except Exception as e:
             logger.error(f"[{self.service_id}] Error applying rules for agent '{agent_id}': {e}", exc_info=True)
-
-
 
     def _apply_extended_window_logic(self, agent_id: str, current_power: str, raw_rule_decision: str) -> str:
         """
@@ -628,8 +606,6 @@ class ContextRuleManager:
             
         except Exception as e:
             logger.error(f"[{self.service_id}] Error sending action command to {agent_id}: {e}", exc_info=True)
-
-
 
     def evaluate_rules(self, agent_id: str, current_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -1045,26 +1021,15 @@ class ContextRuleManager:
     def _publish_rules_command_result(self, command_id: str, success: bool, message: str, action: str):
         """Publish rules command result back via MQTT using Event structure."""
         try:
-            result_event = Event(
-                event=EventMetadata(
-                    id="",  # Auto-generated
-                    timestamp="",  # Auto-generated  
-                    type="rulesCommandResult"
-                ),
-                source=EntityInfo(
-                    entityType="contextManager",
-                    entityId="CM-MainController"
-                ),
-                payload={
-                    "command_id": command_id,
-                    "success": success,
-                    "message": message,
-                    "action": action,
-                    "loaded_files": list(self.loaded_rule_files)
-                }
+            result_event = EventFactory.create_rules_command_result_event(
+                command_id=command_id,
+                success=success,
+                message=message,
+                action=action,
+                loaded_files=list(self.loaded_rule_files)
             )
             
-            result_topic = "context/rules/result"
+            result_topic = TopicManager.rules_management_result()
             result_message = MQTTMessage.serialize(result_event)
             self.mqtt_client.publish(result_topic, result_message, qos=1)
             
@@ -1284,24 +1249,13 @@ class ContextRuleManager:
         """Publish sensor configuration command result back to dashboard via MQTT using Event structure."""
         try:
             # Create Event structure for command result
-            result_event = Event(
-                event=EventMetadata(
-                    id="",  # Auto-generated
-                    timestamp="",  # Auto-generated  
-                    type="sensorConfigCommandResult"
-                ),
-                source=EntityInfo(
-                    entityType="contextManager",
-                    entityId="CM-MainController"
-                ),
-                payload={
-                    "command_id": command_id,
-                    "success": success,
-                    "message": message,
-                    "agent_id": agent_id,
-                    "action": action,
-                    "current_sensors": current_sensors or []
-                }
+            result_event = EventFactory.create_sensor_config_command_result_event(
+                command_id=command_id,
+                success=success,
+                message=message,
+                agent_id=agent_id,
+                action=action,
+                current_sensors=current_sensors
             )
             
             result_topic = TopicManager.dashboard_sensor_config_result()
