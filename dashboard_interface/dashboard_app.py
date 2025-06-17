@@ -1,4 +1,4 @@
-from dashboard_subscriber import EnhancedDashboardSubscriber as eds
+from new_dashboard_subscriber import EnhancedDashboardSubscriber as eds
 from design import MeetingRoomDesign
 import time # May be required by DashboardClient or Streamlit app
 import random
