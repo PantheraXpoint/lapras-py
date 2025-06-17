@@ -1,7 +1,6 @@
 import os
 import sys
 import time
-
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
@@ -22,7 +21,9 @@ def get_config():
     return config
 
 
-def get_event_db(config):
+def get_event_db(config = None):
+    if config is None:
+        config = get_config()
     try:
         client = MongoClient(
             config['mongo']['uri'],
@@ -41,6 +42,19 @@ def get_event_db(config):
         raise RuntimeError(f"MongoDB operation failed: {e}")
     except Exception as e:
         raise RuntimeError(f"An unknown error occurred while connecting to MongoDB: {e}")
+
+
+def query_event_db(db, collection_name, query_filter=None):
+    if query_filter is None:
+        query_filter = {}
+    try:
+        c = db[collection_name]
+        results = list(c.find(query_filter))
+        return results
+    except Exception as e:
+        print(f"Error querying the database: {e}")
+        return None
+
 
 if __name__ == "__main__":
     config = get_config()

@@ -2,12 +2,16 @@ import os
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from utils.new_dashboard_subscriber import EnhancedDashboardSubscriber as eds
+from lapras_middleware.event_db import get_event_db, query_event_db
 from design import MeetingRoomDesign
 import time # May be required by DashboardClient or Streamlit app
 import streamlit as st
 from st_bridge import bridge
 
 def main():
+    # Timer for periodic auto update
+    if 'last_update_time' not in st.session_state:
+        st.session_state.last_update_time = time.time()
     # Initialize DashboardClient instance and related session_state variables
     if 'mqtt_client' not in st.session_state:
         st.info("Initializing MQTT client...")
@@ -68,41 +72,21 @@ def main():
             # On failure, either set client to None or stop the app
             st.session_state.mqtt_client = None
             st.stop() # 또는 st.experimental_singleton을 사용한 경우라면 None을 반환
-
-    # Timer for periodic auto update
-    if 'last_update_time' not in st.session_state:
-        st.session_state.last_update_time = time.time()
-
     # Initialize MQTT message receive flag
     if 'mqtt_update_received' not in st.session_state:
         st.session_state.mqtt_update_received = False
     if 'mqtt_last_update_time' not in st.session_state:
         st.session_state.mqtt_last_update_time = 0
 
-    # Perform rerun in main thread when MQTT message is received
-    if st.session_state.get('mqtt_update_received', False):
-        # 플래그 초기화
-        st.session_state.mqtt_update_received = False
-        mqtt_update_time = st.session_state.get('mqtt_last_update_time', 0)
-        current_time = time.time()
-
-        # 디버깅 정보
-        print(f"메인 스레드에서 MQTT 업데이트 감지 - 경과 시간: {current_time - mqtt_update_time:.2f}초")
-
-        # 1초 이내에 업데이트된 경우에만 rerun 실행
-        if current_time - mqtt_update_time < 5:  # 5초 이내의 업데이트만 처리
-            print("메인 스레드에서 rerun 실행")
-            st.rerun()
-
     client = st.session_state.get('mqtt_client')
     designer = st.session_state.room_designer
+    db = get_event_db()  # Initialize the event database connection
 
     # --- UI Layout: Main content area and right control column ---
     col1, controls_col = st.columns([0.85, 0.15])
     main_content_col = col1.empty()
 
     with controls_col:
-        client = st.session_state.get('mqtt_client')
         st.subheader("Control")
 
         # Use only the default light
@@ -132,7 +116,6 @@ def main():
 
     while True:
         all_sensors = client.get_all_sensors() if client else {}
-        main_content_col.empty() # Clear the main content area before redrawing
         if all_sensors:
             meeting_room_svg = designer.generate_meeting_room_svg(sensors=all_sensors)
             if meeting_room_svg != last_svg:  # Only update if SVG has changed
@@ -143,7 +126,7 @@ def main():
             with main_content_col:
                 st.info("Waiting to receive meeting room status information...")
 
-        time.sleep(5)
+        time.sleep(1)
 
 if __name__ == "__main__":
     st.set_page_config(page_title="Live IoT Dashboard", layout="wide")
