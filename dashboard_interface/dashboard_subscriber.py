@@ -72,19 +72,7 @@ class EnhancedDashboardSubscriber:
         self.mqtt_client.on_disconnect = self._on_disconnect
         
         logger.info(f"Initialized enhanced dashboard subscriber with client ID: {client_id}")
-        
-        # st 객체가 전달되었는지 확인
-        if st is not None:
-            print(f"__init__에서 받은 st 객체 타입: {type(st)}")
-            print(f"st.rerun 메서드 존재: {hasattr(st, 'rerun')}")
-            # 필요한 경우 메서드 사용 가능성 확인
-            try:
-                if hasattr(st, "rerun"):
-                    print("st.rerun 메서드가 존재합니다.")
-            except Exception as e:
-                print(f"st 메서드 확인 중 오류: {e}")
-        else:
-            print("__init__에서 st 객체를 받지 못했습니다!")
+
 
     def _on_connect(self, client, userdata, flags, rc):
         """Callback when connected to MQTT broker."""
@@ -125,14 +113,6 @@ class EnhancedDashboardSubscriber:
             # print("메시지 내용:")
             # print(json.dumps(message_data, indent=2, ensure_ascii=False))
             # print("===========================\n")
-            
-            # self.st 타입 검증 및 출력
-            print("self.st 타입:", type(self.st))
-            if self.st is not None:
-                print("self.st.session_state 존재:", hasattr(self.st, 'session_state'))
-                print("self.st.rerun 존재:", hasattr(self.st, 'rerun'))
-                if hasattr(self.st, 'rerun'):
-                    print("self.st.rerun 타입:", type(self.st.rerun))
             
             # Process based on topic
             if msg.topic == self.context_topic:

@@ -2,53 +2,52 @@ class MeetingRoomDesign:
     # Use the IDs as written in the diagram
     element_positions = {
         # TV, temperature, Door
-        'TV Screen': (5, 0),
-        'temperature_3': (8, 0),  # Moved to the right
-        'door_01': (11, 10),  # Located at the center of the room entrance
+        'TV Screen': (4, 0),
+        'temperature_3': (7, 0),
+        'door_01': (8, 9),  # Located at the center of the room entrance
         # Light, Infrared (left center vertical line)
-        'light_1': (1, 5),
-        'infrared_5': (1, 8),
-        'infrared_6': (1, 6),
-        'infrared_7': (1, 4),
-        'infrared_8': (1, 2),
+        'light_1': (0, 4),
+        'infrared_5': (0, 6),
+        'infrared_6': (0, 5),
+        'infrared_7': (0, 3),
+        'infrared_8': (0, 2),
         # Chairs (A row: left, B row: right, rows 2~6, 7B has same x as AC)
-        'activity_s2a': (3, 3),
-        'activity_s3a': (3, 4),
-        'activity_s4a': (3, 5),
-        'activity_s5a': (3, 6),
-        'activity_s6a': (3, 7),
-        'activity_s1b': (7, 2),
-        'activity_s2b': (7, 3),
-        'activity_s3b': (7, 4),
-        'activity_s4b': (7, 5),
-        'activity_s5b': (7, 6),
-        'activity_s6b': (7, 7),
-        'activity_s7b': (5, 8),  # Same x coordinate as AC (5)
+        'activity_s2a': (2, 2),
+        'activity_s3a': (2, 3),
+        'activity_s4a': (2, 4),
+        'activity_s5a': (2, 5),
+        'activity_s6a': (2, 6),
+        'activity_s1b': (6, 1),
+        'activity_s2b': (6, 2),
+        'activity_s3b': (6, 3),
+        'activity_s4b': (6, 4),
+        'activity_s5b': (6, 5),
+        'activity_s6b': (6, 6),
+        'activity_s7b': (4, 7),  # Same x coordinate as AC (5)
         # Motion
-        'motion_MW1': (1, 10),
-        'motion_01': (2, 3),
-        'motion_02': (2, 5),
-        'motion_03': (2, 7),
-        'motion_04': (4, 9),
-        'motion_05': (6, 9),
-        'motion_06': (8, 7),
-        'motion_07': (8, 5),
-        'motion_08': (8, 3),
-        'motion_MF1': (8, 1),
+        'motion_MW1': (0, 9),
+        'motion_01': (1, 2),
+        'motion_02': (1, 4),
+        'motion_03': (1, 6),
+        'motion_04': (2, 8),
+        'motion_05': (6, 8),
+        'motion_06': (7, 6),
+        'motion_07': (7, 4),
+        'motion_08': (7, 2),
+        'motion_MF1': (8, 0),
         # infrared (right vertical line)
-        'infrared_1': (10, 8),
-        'infrared_2': (10, 6),
-        'infrared_3': (10, 4),
-        'infrared_4': (10, 2),
+        'infrared_1': (8, 6),
+        'infrared_2': (8, 5),
+        'infrared_3': (8, 3),
+        'infrared_4': (8, 2),
         # AC
-        'AC A01': (5, 3),
-        'AC A02': (5, 6),
+        'AC A01': (4, 2),
+        'AC A02': (4, 5),
     }
-    grid_size = 12  # 12x12 그리드
-    cell_w = 70
-    cell_h = 70
-    width = grid_size * cell_w
-    height = grid_size * cell_h
+    cell_w = 80
+    cell_h = 80
+    width = 9 * cell_w
+    height = 10 * cell_h
 
     def __init__(self):
         self.activity_color = "#4CAF50"
@@ -100,15 +99,12 @@ class MeetingRoomDesign:
                 </div>
             `;
             document.body.appendChild(popup);
-            var data = {message : "${sensorId}"};
-            window.parent.postMessage(data, '*');
+            window.parent.stBridges.send('sensor-id-bridge', sensorId);
         }
         </script>
         """
-        svg = [popup_js]
-        svg.append(f'<svg width="{self.width}" height="{self.height}" style="border:1px solid #333;">')
-        # 방 테두리
-        svg.append(f'<rect x="0" y="0" width="{self.width}" height="{self.height}" fill="none" stroke="#000" stroke-width="4"/>')
+        svg = [popup_js, f'<svg width="{self.width}" height="{self.height}" style="border:1px solid #333;">',
+               f'<rect x="0" y="0" width="{self.width}" height="{self.height}" fill="none" stroke="#000" stroke-width="4"/>']
         # 요소 그리기
         for eid, (gx, gy) in self.element_positions.items():
             x = gx * self.cell_w + self.cell_w // 2
