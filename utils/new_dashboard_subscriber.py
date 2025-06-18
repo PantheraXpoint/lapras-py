@@ -84,16 +84,19 @@ class EnhancedDashboardSubscriber:
         
         # st 객체가 전달되었는지 확인
         if st is not None:
-            print(f"__init__에서 받은 st 객체 타입: {type(st)}")
-            print(f"st.rerun 메서드 존재: {hasattr(st, 'rerun')}")
+            # print(f"__init__에서 받은 st 객체 타입: {type(st)}")
+            # print(f"st.rerun 메서드 존재: {hasattr(st, 'rerun')}")
             # 필요한 경우 메서드 사용 가능성 확인
             try:
                 if hasattr(st, "rerun"):
-                    print("st.rerun 메서드가 존재합니다.")
+                    # print("st.rerun 메서드가 존재합니다.")
+                    pass
             except Exception as e:
-                print(f"st 메서드 확인 중 오류: {e}")
+                # print(f"st 메서드 확인 중 오류: {e}")
+                pass
         else:
-            print("__init__에서 st 객체를 받지 못했습니다!")
+            # print("__init__에서 st 객체를 받지 못했습니다!")
+            pass
 
     def _on_connect(self, client, userdata, flags, rc):
         """Callback when connected to MQTT broker."""
@@ -136,12 +139,13 @@ class EnhancedDashboardSubscriber:
             # print("===========================\n")
             
             # self.st 타입 검증 및 출력
-            print("self.st 타입:", type(self.st))
+            # print("self.st 타입:", type(self.st))
             if self.st is not None:
-                print("self.st.session_state 존재:", hasattr(self.st, 'session_state'))
-                print("self.st.rerun 존재:", hasattr(self.st, 'rerun'))
+                # print("self.st.session_state 존재:", hasattr(self.st, 'session_state'))
+                # print("self.st.rerun 존재:", hasattr(self.st, 'rerun'))
                 if hasattr(self.st, 'rerun'):
-                    print("self.st.rerun 타입:", type(self.st.rerun))
+                    # print("self.st.rerun 타입:", type(self.st.rerun))
+                    pass
             
             # Process based on topic
             if msg.topic == self.context_topic:
@@ -208,7 +212,7 @@ class EnhancedDashboardSubscriber:
                                             "hue_light": hue_light_data
                                         }
                                     }
-                                    print(f"조명 에이전트 {agent_id} 상태 템플릿 저장됨")
+                                    # print(f"조명 에이전트 {agent_id} 상태 템플릿 저장됨")
             
             # Process messages from dashboard agent topic
             elif msg.topic == self.dashboard_agent_topic:
@@ -299,20 +303,22 @@ class EnhancedDashboardSubscriber:
                         self.st.session_state['mqtt_last_update_time'] = current_time
                         
                         # 디버깅 정보
-                        print(f"MQTT 메시지 수신: {msg.topic} - 세션 플래그 설정됨")
-                        print(f"mqtt_update_received = {self.st.session_state.get('mqtt_update_received', False)}")
-                        print(f"mqtt_last_update_time = {self.st.session_state.get('mqtt_last_update_time', 0)}")
+                        # print(f"MQTT 메시지 수신: {msg.topic} - 세션 플래그 설정됨")
+                        # print(f"mqtt_update_received = {self.st.session_state.get('mqtt_update_received', False)}")
+                        # print(f"mqtt_last_update_time = {self.st.session_state.get('mqtt_last_update_time', 0)}")
                         
-                    print(f"Streamlit 세션 플래그 설정됨 - 현재 시간: {current_time}, 마지막 업데이트: {self.last_rerun_time}")
+                    # print(f"Streamlit 세션 플래그 설정됨 - 현재 시간: {current_time}, 마지막 업데이트: {self.last_rerun_time}")
                 else:
-                    print("Streamlit 인스턴스가 설정되지 않았거나 session_state가 없습니다.")
-                    print(f"self.st 타입: {type(self.st)}")
-                    print(f"self.st에 session_state 속성 존재: {hasattr(self.st, 'session_state') if self.st is not None else False}")
+                    # print("Streamlit 인스턴스가 설정되지 않았거나 session_state가 없습니다.")
+                    # print(f"self.st 타입: {type(self.st)}")
+                    # print(f"self.st에 session_state 속성 존재: {hasattr(self.st, 'session_state') if self.st is not None else False}")
+                    pass
             except Exception as st_e:
                 # Rerun 오류는 무시 (메인 스레드가 아닐 때 발생하는 오류)
-                print(f"Streamlit 재실행 중 오류 발생: {st_e}")
+                # print(f"Streamlit 재실행 중 오류 발생: {st_e}")
                 import traceback
-                traceback.print_exc()
+                # traceback.print_exc()
+                pass
                 
         except Exception as e:
             logger.error(f"Error processing message: {e}")
@@ -344,7 +350,7 @@ class EnhancedDashboardSubscriber:
                         'last_update': sensor_data.get('last_update'),
                         'sensor_type': sensor_type
                     }
-                print(f"self.all_sensors: {json.dumps(self.all_sensors, indent=2, ensure_ascii=False)}")
+                # print(f"self.all_sensors: {json.dumps(self.all_sensors, indent=2, ensure_ascii=False)}")
         return self.all_sensors
     
     def get_door_sensors(self):
@@ -715,7 +721,7 @@ class EnhancedDashboardSubscriber:
         try:
             # 현재 타임스탬프
             current_time = time.time()
-            print("keys", self.all_sensors.keys())
+            # print("keys", self.all_sensors.keys())
             # Check if there's a sensors object
             sensors_data = payload.get("sensors", {})
             if not sensors_data:
@@ -779,10 +785,10 @@ class EnhancedDashboardSubscriber:
             self.mqtt_client.publish("dashboard/control/command", command_message, qos=1)
             
             # 전송된 명령 메시지 출력 (디버깅용)
-            print("\n===== 전송된 명령 메시지 (수정된 형식) =====")
-            print(f"토픽: dashboard/control/command")
-            print(f"메시지 내용: {command_message}")
-            print("========================================\n")
+            # print("\n===== 전송된 명령 메시지 (수정된 형식) =====")
+            # print(f"토픽: dashboard/control/command")
+            # print(f"메시지 내용: {command_message}")
+            # print("========================================\n")
             
             # 명령 결과 추적용으로 command_id 반환
             return command_id
@@ -790,18 +796,22 @@ class EnhancedDashboardSubscriber:
     def set_streamlit(self, st_instance):
         """앱에서 Streamlit 인스턴스를 설정합니다."""
         self.st = st_instance
-        print(f"set_streamlit 메서드에서 전달받은 st 객체 타입: {type(st_instance)}")
+        # print(f"set_streamlit 메서드에서 전달받은 st 객체 타입: {type(st_instance)}")
         
         # st 객체 검증
         if hasattr(st_instance, 'rerun'):
-            print("st.rerun 메서드 존재 - 정상")
+            # print("st.rerun 메서드 존재 - 정상")
+            pass
         else:
-            print("⚠️ 경고: st 객체에 rerun 메서드가 없습니다!")
+            # print("⚠️ 경고: st 객체에 rerun 메서드가 없습니다!")
+            pass
             
         if hasattr(st_instance, 'session_state'):
-            print("st.session_state 존재 - 정상")
+            # print("st.session_state 존재 - 정상")
+            pass
         else:
-            print("⚠️ 경고: st 객체에 session_state 속성이 없습니다!")
+            # print("⚠️ 경고: st 객체에 session_state 속성이 없습니다!")
+            pass
             
         return self
 

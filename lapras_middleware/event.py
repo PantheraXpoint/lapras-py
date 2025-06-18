@@ -290,6 +290,168 @@ class EventFactory:
             }
         )
 
+    @staticmethod
+    def create_dashboard_rules_request_event(
+        action: str,  # "switch_preset", "switch", "load", "clear", "list", "list_presets"
+        preset_name: Optional[str] = None,
+        rule_files: Optional[List[str]] = None,
+        source_entity_id: str = "Dashboard"
+    ) -> Event:
+        """Create a dashboardRulesRequest event for rule management via dashboard."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="dashboardRulesRequest"
+            ),
+            source=EntityInfo(
+                entityType="dashboard",
+                entityId=source_entity_id
+            ),
+            payload={
+                "action": action,
+                "preset_name": preset_name,
+                "rule_files": rule_files or []
+            }
+        )
+
+    @staticmethod
+    def create_dashboard_rules_response_event(
+        command_id: str,
+        success: bool,
+        message: str,
+        action: str,
+        dashboard_id: str,
+        source_entity_id: str = "RuleAgent"
+    ) -> Event:
+        """Create a dashboardRulesResponse event from rule agent back to dashboard."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="dashboardRulesResponse"
+            ),
+            source=EntityInfo(
+                entityType="ruleAgent",
+                entityId=source_entity_id
+            ),
+            payload={
+                "command_id": command_id,
+                "success": success,
+                "message": message,
+                "action": action,
+                "dashboard_id": dashboard_id
+            }
+        )
+
+    @staticmethod
+    def create_dashboard_command_result_event(
+        command_id: str,
+        success: bool,
+        message: str,
+        agent_id: Optional[str],
+        action_event_id: Optional[str] = None
+    ) -> Event:
+        """Create a dashboardCommandResult event for manual control command results."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="dashboardCommandResult"
+            ),
+            source=EntityInfo(
+                entityType="contextManager",
+                entityId="CM-MainController"
+            ),
+            payload={
+                "command_id": command_id,
+                "success": success,
+                "message": message,
+                "agent_id": agent_id,
+                "action_event_id": action_event_id
+            }
+        )
+
+    @staticmethod
+    def create_dashboard_state_update_event(
+        agents: Dict[str, Any],
+        summary: Dict[str, Any]
+    ) -> Event:
+        """Create a dashboardStateUpdate event for publishing system state to dashboard."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="dashboardStateUpdate"
+            ),
+            source=EntityInfo(
+                entityType="contextManager",
+                entityId="CM-MainController"
+            ),
+            payload={
+                "agents": agents,
+                "summary": summary
+            }
+        )
+
+    @staticmethod
+    def create_rules_command_result_event(
+        command_id: str,
+        success: bool,
+        message: str,
+        action: str,
+        loaded_files: Optional[List[str]] = None
+    ) -> Event:
+        """Create a rulesCommandResult event for rules management command results."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="rulesCommandResult"
+            ),
+            source=EntityInfo(
+                entityType="contextManager",
+                entityId="CM-MainController"
+            ),
+            payload={
+                "command_id": command_id,
+                "success": success,
+                "message": message,
+                "action": action,
+                "loaded_files": loaded_files or []
+            }
+        )
+
+    @staticmethod
+    def create_sensor_config_command_result_event(
+        command_id: str,
+        success: bool,
+        message: str,
+        agent_id: Optional[str],
+        action: Optional[str] = None,
+        current_sensors: Optional[List[str]] = None
+    ) -> Event:
+        """Create a sensorConfigCommandResult event for sensor configuration command results."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="sensorConfigCommandResult"
+            ),
+            source=EntityInfo(
+                entityType="contextManager",
+                entityId="CM-MainController"
+            ),
+            payload={
+                "command_id": command_id,
+                "success": success,
+                "message": message,
+                "agent_id": agent_id,
+                "action": action,
+                "current_sensors": current_sensors or []
+            }
+        )
+
 class MQTTMessage:
     """Utility class for MQTT message serialization/deserialization."""
     

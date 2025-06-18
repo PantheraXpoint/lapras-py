@@ -109,21 +109,11 @@ class RuleAgentTester:
         """Send a dashboard rules request via Rule Agent."""
         try:
             # Create dashboard rules request event
-            event = Event(
-                event=EventMetadata(
-                    id="",  # Auto-generated
-                    timestamp="",  # Auto-generated
-                    type="dashboardRulesRequest"
-                ),
-                source=EntityInfo(
-                    entityType="dashboard",
-                    entityId=self.client_id
-                ),
-                payload={
-                    "action": action,
-                    "preset_name": preset_name,
-                    "rule_files": rule_files or []
-                }
+            event = EventFactory.create_dashboard_rules_request_event(
+                action=action,
+                preset_name=preset_name,
+                rule_files=rule_files,
+                source_entity_id=self.client_id
             )
             
             # Send to rule agent
