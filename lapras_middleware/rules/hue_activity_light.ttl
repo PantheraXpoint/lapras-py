@@ -1,0 +1,65 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Hue light activity + light sensor rules ---
+# Turn ON light when activity is detected AND light is dark
+# Turn OFF light when no activity OR light is bright
+
+# Turn ON light when activity is detected AND light is dark
+lapras:HueLightOnWhenActiveAndDarkRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsActivityActiveCondition ;
+    lapras:hasCondition lapras:IsLightOffCondition ;
+    lapras:hasCondition lapras:IsDarkCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOn .
+
+lapras:IsActivityActiveCondition
+    lapras:hasSensor "activity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "active" .
+
+lapras:IsLightOffCondition
+    lapras:hasSensor "power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "off" .
+
+lapras:IsDarkCondition
+    lapras:hasSensor "light_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "dark" .
+
+lapras:SetHueLightPowerOn lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn OFF light when no activity is detected
+lapras:HueLightOffWhenInactiveRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsLightOnCondition ;
+    lapras:hasCondition lapras:IsActivityInactiveCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOff .
+
+# Turn OFF light when light becomes bright (daylight override)
+lapras:HueLightOffWhenBrightRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsLightOnCondition ;
+    lapras:hasCondition lapras:IsBrightCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOffFromBright .
+
+lapras:IsLightOnCondition
+    lapras:hasSensor "power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+lapras:IsActivityInactiveCondition
+    lapras:hasSensor "activity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "inactive" .
+
+lapras:IsBrightCondition
+    lapras:hasSensor "light_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "bright" .
+
+lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' .
+lapras:SetHueLightPowerOffFromBright lapras:hasStateUpdate '{"power": "off"}' . 

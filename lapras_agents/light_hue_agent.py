@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 
 class LightHueAgent(VirtualAgent):
     def __init__(self, agent_id: str = "hue_light", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, 
-                 sensor_config: dict = None, transmission_interval: float = 0.5):
+                 sensor_config: dict = None, transmission_interval: float = 0.5, 
+                 light_threshold: float = 50.0):
         super().__init__(agent_id, "hue_light", mqtt_broker, mqtt_port)
         
         logger.info(f"[{self.agent_id}] LightHueAgent initialized")
@@ -26,11 +27,15 @@ class LightHueAgent(VirtualAgent):
         # Default sensor configuration if none provided
         if sensor_config is None:
             sensor_config = {
-                "infrared": ["infrared_1", "infrared_2"]  # Default to infrared sensors
+                "infrared": ["infrared_1", "infrared_2"],  # Default to infrared sensors
+                "light": ["light_1"]  # Add light sensor support
             }
         
         self.sensor_config = sensor_config
-        self.supported_sensor_types = ["infrared", "motion", "activity"]
+        self.supported_sensor_types = ["infrared", "motion", "activity", "light"]
+
+        # Light sensor configuration for bright/dark classification
+        self.light_threshold = light_threshold  # lux threshold: below = dark, above = bright
 
         # Transmission rate control
         self.transmission_interval = transmission_interval  # seconds between transmissions
@@ -45,6 +50,7 @@ class LightHueAgent(VirtualAgent):
             "motion_status": "unknown", 
             "activity_status": "unknown",
             "activity_detected": False,
+            "light_status": "unknown",  # bright or dark
         })
         
         logger.info(f"[{self.agent_id}] Initialized with actual light state: {actual_power_state}")
@@ -54,7 +60,7 @@ class LightHueAgent(VirtualAgent):
         # Dynamically add sensors based on configuration
         self._configure_sensors()
         
-        logger.info(f"[{self.agent_id}] LightHueAgent initialization completed with sensors: {sensor_config} and transmission interval: {transmission_interval}s")
+        logger.info(f"[{self.agent_id}] LightHueAgent initialization completed with sensors: {sensor_config}, transmission interval: {transmission_interval}s, light threshold: {light_threshold} lux")
 
         # Publish initial state to context manager
         self._trigger_initial_state_publication()
@@ -116,6 +122,8 @@ class LightHueAgent(VirtualAgent):
             self._process_motion_sensor(sensor_payload, sensor_id, current_time)
         elif sensor_payload.sensor_type == "activity":
             self._process_activity_sensor(sensor_payload, sensor_id, current_time)
+        elif sensor_payload.sensor_type == "light":
+            self._process_light_sensor(sensor_payload, sensor_id, current_time)
         else:
             logger.warning(f"[{self.agent_id}] Unsupported sensor type: {sensor_payload.sensor_type}")
     
@@ -214,6 +222,33 @@ class LightHueAgent(VirtualAgent):
 
             # Update activity_detected field for rules
             self._update_activity_detected()
+
+            # Rate-limited state publication to context manager
+            self._schedule_transmission()
+    
+    def _process_light_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
+        """Process light sensor updates and convert lux to bright/dark terms."""
+        with self.state_lock:
+            # Update sensor data
+            self.sensor_data[sensor_id] = {
+                "sensor_type": sensor_payload.sensor_type,
+                "value": sensor_payload.value,
+                "unit": sensor_payload.unit,
+                "metadata": sensor_payload.metadata,
+            }
+
+            # Convert lux value to bright/dark based on threshold
+            try:
+                lux_value = float(sensor_payload.value)
+                light_status = "bright" if lux_value >= self.light_threshold else "dark"
+                
+                if self.local_state.get("light_status") != light_status:
+                    self.local_state["light_status"] = light_status
+                    logger.info(f"[{self.agent_id}] Updated light_status to: {light_status} (lux: {lux_value})")
+                
+            except (ValueError, TypeError) as e:
+                logger.warning(f"[{self.agent_id}] Could not convert light sensor value to float: {sensor_payload.value}, error: {e}")
+                return
 
             # Rate-limited state publication to context manager
             self._schedule_transmission()
