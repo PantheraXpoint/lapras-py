@@ -756,7 +756,7 @@ class EnhancedDashboardSubscriber:
             command_event = {
                 "event": {
                     "id": command_id,
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "timestamp": list(time.gmtime()),  # FIXED: Use list format instead of string
                     "type": "dashboardCommand",
                     "location": None,
                     "contextType": None,
