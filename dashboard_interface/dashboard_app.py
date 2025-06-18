@@ -7,6 +7,8 @@ from design import MeetingRoomDesign
 import time # May be required by DashboardClient or Streamlit app
 import streamlit as st
 from st_bridge import bridge
+import pandas as pd
+from datetime import datetime
 
 def main():
     TARGET_LIGHT_AGENT_ID = "hue_light"
@@ -104,7 +106,22 @@ def main():
     clicked_sensor = bridge("sensor-id-bridge", default="")
     last_svg = ""
     if clicked_sensor:
-        st.write(f"Clicked sensor ID: {clicked_sensor}")
+        #st.write(f"Clicked sensor ID: {clicked_sensor}")
+        # Querying the sensor data from database
+        sensor_data = query_event_db(db, clicked_sensor)
+        if sensor_data and not df.empty:
+            # Convert timestamp to datetime for plotting
+            df = pd.DataFrame([
+                {
+                    'timestamp': datetime.fromtimestamp(sensor_value['timestamp']),
+                    'value': sensor_value['value']
+                }
+                for sensor_value in sensor_data
+            ])
+            # Plot the data using Streamlit's line chart
+            st.line_chart(df.set_index('timestamp')['value'])
+        else:
+            st.info("No data found for this sensor")
     light_switch = light_btn.button("Light Switch", key="light_switch", use_container_width=True)
     ac_switch = ac_btn.button("AC Switch", key="ac_switch", use_container_width=True)
 
