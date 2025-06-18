@@ -14,11 +14,14 @@ from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager, Sen
 try:
     from lapras_agents.utils.test_ir_controller import AirConditionerController
 except ImportError:
-    logger = logging.getLogger(__name__)
-    logger.warning("AirConditionerController not available - using mock implementation")
     AirConditionerController = None
+    # Logger will be defined below - no need for duplicate declaration
 
 logger = logging.getLogger(__name__)
+
+# Log warning if IR controller is not available
+if AirConditionerController is None:
+    logger.warning("AirConditionerController not available - using mock implementation")
 
 class AirconAgent(VirtualAgent):
     def __init__(self, agent_id: str = "aircon", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, 
@@ -354,6 +357,7 @@ class AirconAgent(VirtualAgent):
             
             # Check if proximity status changed for infrared sensors
             if sensor_payload.sensor_type == "infrared" and sensor_payload.metadata:
+                assert isinstance(old_sensor_data, dict), f"[YUHENG] meta is {old_sensor_data}, sensor_payload metadata is {sensor_payload.metadata}"
                 old_proximity = old_sensor_data.get("metadata", {}).get("proximity_status") if old_sensor_data else None
                 new_proximity = sensor_payload.metadata.get("proximity_status")
                 
@@ -528,17 +532,28 @@ class AirconAgent(VirtualAgent):
         """Execute aircon control actions with fast response (no verification)."""
         logger.info(f"[{self.agent_id}] Executing action: {action_payload.actionName}")
         
+        # Check if verification should be skipped for faster response
+        # For manual commands or when explicitly disabled
+        skip_verification = action_payload.parameters and action_payload.parameters.get("skip_verification", False)
+        
         try:            
             if action_payload.actionName == "turn_on":
                 # Execute the physical action
                 result = self.__turn_on_aircon()
                 
-                # Update local state immediately without verification
-                with self.state_lock:
-                    self.local_state["power"] = "on"
-                    result["new_state"]["power"] = "on"
-                
-                logger.info(f"[{self.agent_id}] Turn ON command executed")
+                if skip_verification:
+                    # Skip verification for faster response
+                    logger.info(f"[{self.agent_id}] Turn ON command executed (verification skipped for speed)")
+                    with self.state_lock:
+                        self.local_state["power"] = "on"
+                        result["new_state"]["power"] = "on"
+                        result["message"] = "Turn ON: executed (verification skipped)"
+                else:
+                    # Update local state immediately without verification (aircon doesn't have verification)
+                    logger.info(f"[{self.agent_id}] Turn ON command executed")
+                    with self.state_lock:
+                        self.local_state["power"] = "on"
+                        result["new_state"]["power"] = "on"
                 
                 # Always trigger state publication
                 self._trigger_state_publication()
@@ -547,12 +562,19 @@ class AirconAgent(VirtualAgent):
                 # Execute the physical action
                 result = self.__turn_off_aircon()
                 
-                # Update local state immediately without verification
-                with self.state_lock:
-                    self.local_state["power"] = "off"
-                    result["new_state"]["power"] = "off"
-                
-                logger.info(f"[{self.agent_id}] Turn OFF command executed")
+                if skip_verification:
+                    # Skip verification for faster response
+                    logger.info(f"[{self.agent_id}] Turn OFF command executed (verification skipped for speed)")
+                    with self.state_lock:
+                        self.local_state["power"] = "off"
+                        result["new_state"]["power"] = "off"
+                        result["message"] = "Turn OFF: executed (verification skipped)"
+                else:
+                    # Update local state immediately without verification (aircon doesn't have verification)
+                    logger.info(f"[{self.agent_id}] Turn OFF command executed")
+                    with self.state_lock:
+                        self.local_state["power"] = "off"
+                        result["new_state"]["power"] = "off"
                 
                 # Always trigger state publication
                 self._trigger_state_publication()
@@ -628,9 +650,10 @@ class AirconAgent(VirtualAgent):
             else:
                 result = {
                     "success": False,
-                    "message": f"Unknown action type: {action_payload.actionName}"
+                    "message": f"Unknown action: {action_payload.actionName}",
+                    "new_state": {}
                 }
-                logger.warning(f"[{self.agent_id}] Unknown action type: {action_payload.actionName}")
+                logger.warning(f"[{self.agent_id}] Unknown action: {action_payload.actionName}")
             
             return result
             
@@ -665,3 +688,26 @@ class AirconAgent(VirtualAgent):
             
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error publishing initial state: {e}")
+
+    def refresh_aircon_state(self):
+        """Manually refresh the aircon state and update local state."""
+        try:
+            logger.info(f"[{self.agent_id}] Manually refreshing aircon state...")
+            
+            with self.state_lock:
+                old_power_state = self.local_state.get("power")
+                # Since we don't have verification anymore, just log current state
+                current_power_state = self.local_state.get("power")
+                
+                if old_power_state == current_power_state:
+                    logger.debug(f"[{self.agent_id}] Aircon state refresh: no change ({current_power_state})")
+                    return False  # No state change
+                else:
+                    logger.info(f"[{self.agent_id}] Aircon state refreshed: {old_power_state} → {current_power_state}")
+                    # Trigger state publication since state changed
+                    self._trigger_state_publication()
+                    return True  # State changed
+                    
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error refreshing aircon state: {e}")
+            return False

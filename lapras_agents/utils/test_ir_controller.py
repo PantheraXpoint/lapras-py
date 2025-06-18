@@ -3,8 +3,7 @@ from Phidget22.Devices.IR import *
 import time
 import logging
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
+# Logger will use the configuration set by the startup script
 logger = logging.getLogger(__name__)
 
 class PhidgetIRController:
