@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 class LightHueAgent(VirtualAgent):
     def __init__(self, agent_id: str = "hue_light", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, 
-                 sensor_config: dict = None, transmission_interval: float = 0.5, 
+                 sensor_config: dict = None, transmission_interval: float = 0.1, 
                  light_threshold: float = 50.0):
         super().__init__(agent_id, "hue_light", mqtt_broker, mqtt_port)
         
@@ -395,7 +395,7 @@ class LightHueAgent(VirtualAgent):
         
         try:
             # Check the state of all lights (0-10)
-            idxs = list(range(0, 11))
+            idxs = list(range(0, 8))
             lights_on = 0
             total_lights = 0
             
@@ -492,14 +492,14 @@ class LightHueAgent(VirtualAgent):
                 }
         return ret
 
-    def __verify_action_result(self, expected_state: str, max_retries: int = 2, retry_delay: float = 0.5) -> tuple:
+    def __verify_action_result(self, expected_state: str, max_retries: int = 2, retry_delay: float = 0.2) -> tuple:
         """
         Verify that the light state matches the expected state after an action.
         
         Args:
             expected_state: Expected power state ("on" or "off")
             max_retries: Maximum number of verification attempts (reduced for faster response)
-            retry_delay: Delay between verification attempts in seconds (reduced for faster response)
+            retry_delay: Delay between verification attempts in seconds (reduced to 0.2s for faster response)
             
         Returns:
             Tuple of (success: bool, actual_state: str, message: str)
