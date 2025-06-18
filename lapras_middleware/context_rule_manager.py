@@ -65,7 +65,7 @@ class ContextRuleManager:
         self.last_action_commands: Dict[str, Dict[str, Any]] = {}  # agent_id -> {action_name: params, timestamp: time}
         self.action_command_lock = threading.Lock()
         
-        # Extended window logic for agents (15-second timing)
+        # Extended window logic for agents (60-second timing)
         self.extended_window_agents: Dict[str, Dict[str, Any]] = {}  # agent_id -> {start_time, duration, last_extend_time}
         self.extended_window_lock = threading.Lock()
         self.EXTENDED_WINDOW_DURATION = 60.0  # 60 seconds
@@ -454,13 +454,18 @@ class ContextRuleManager:
             
             logger.info(f"[{self.service_id}] Raw rule decision for '{agent_id}': power={raw_power_decision}")
             
-            if raw_power_decision != current_power_state:
-                logger.info(f"[{self.service_id}] Rule decision for '{agent_id}': {current_power_state} → {raw_power_decision}")
+            # Apply extended window logic to prevent rapid on/off switching
+            final_power_decision = self._apply_extended_window_logic(agent_id, current_power_state, raw_power_decision)
+            
+            logger.info(f"[{self.service_id}] Final decision for '{agent_id}' after extended window logic: {current_power_state} → {final_power_decision}")
+            
+            if final_power_decision != current_power_state:
+                logger.info(f"[{self.service_id}] Applying action for '{agent_id}': {current_power_state} → {final_power_decision}")
                 
-                # Send action command based on decision
-                if raw_power_decision == "on":
+                # Send action command based on final decision
+                if final_power_decision == "on":
                     self._send_action_command(agent_id, "turn_on")
-                elif raw_power_decision == "off":
+                elif final_power_decision == "off":
                     self._send_action_command(agent_id, "turn_off")
             else:
                 logger.debug(f"[{self.service_id}] No state change needed for agent '{agent_id}' (already {current_power_state})")
@@ -470,14 +475,14 @@ class ContextRuleManager:
 
     def _apply_extended_window_logic(self, agent_id: str, current_power: str, raw_rule_decision: str) -> str:
         """
-        Apply 15-second extended window logic to rule decisions.
+        Apply extended window logic to rule decisions.
         
         Logic:
-        - OFF → ON: Start 15s window, return "on"
-        - During 15s window:
-          - Rule says "on": Extend window by 15s, return "on" 
+        - OFF → ON: Start extended window, return "on"
+        - During extended window:
+          - Rule says "on": Extend window, return "on" 
           - Rule says "off": Continue countdown, return "on"
-        - After 15s expires: Allow "off", return "off"
+        - After window expires: Allow "off", return "off"
         """
         current_time = time.time()
         
@@ -491,30 +496,36 @@ class ContextRuleManager:
                     "duration": self.EXTENDED_WINDOW_DURATION,
                     "last_extend_time": current_time
                 }
-                logger.info(f"[{self.service_id}] Started 15s extended window for '{agent_id}'")
+                logger.info(f"[{self.service_id}] Started {self.EXTENDED_WINDOW_DURATION}s extended window for '{agent_id}' at {current_time}")
                 return "on"
             
             # Case 2: No active window, follow raw decision
             if not window_info:
+                logger.debug(f"[{self.service_id}] No active window for '{agent_id}', following raw decision: {raw_rule_decision}")
                 return raw_rule_decision
             
             # Case 3: Active window - check if expired
             window_start = window_info["start_time"]
             last_extend = window_info["last_extend_time"]
             time_since_last_extend = current_time - last_extend
+            total_window_time = current_time - window_start
+            
+            # Enhanced logging for debugging
+            logger.info(f"[{self.service_id}] Extended window debug for '{agent_id}': current_time={current_time:.3f}, window_start={window_start:.3f}, last_extend={last_extend:.3f}")
+            logger.info(f"[{self.service_id}] Extended window timing for '{agent_id}': time_since_last_extend={time_since_last_extend:.1f}s, total_window_time={total_window_time:.1f}s, duration={self.EXTENDED_WINDOW_DURATION}s")
             
             # Window expired?
             if time_since_last_extend >= self.EXTENDED_WINDOW_DURATION:
                 # Window expired - remove it and allow raw decision
                 del self.extended_window_agents[agent_id]
-                logger.info(f"[{self.service_id}] Extended window expired for '{agent_id}' - allowing raw decision: {raw_rule_decision}")
+                logger.info(f"[{self.service_id}] Extended window EXPIRED for '{agent_id}' after {time_since_last_extend:.1f}s - allowing raw decision: {raw_rule_decision}")
                 return raw_rule_decision
             
             # Case 4: Active window, rule says "on" - extend window
             if raw_rule_decision == "on":
                 self.extended_window_agents[agent_id]["last_extend_time"] = current_time
                 remaining_time = self.EXTENDED_WINDOW_DURATION - time_since_last_extend
-                logger.info(f"[{self.service_id}] Extended window for '{agent_id}' (was {remaining_time:.1f}s remaining, now reset to 15s)")
+                logger.info(f"[{self.service_id}] Extended window for '{agent_id}' (was {remaining_time:.1f}s remaining, now reset to {self.EXTENDED_WINDOW_DURATION}s)")
                 return "on"
             
             # Case 5: Active window, rule says "off" - continue countdown, stay on
@@ -584,7 +595,7 @@ class ContextRuleManager:
         try:
             # Check if this action command is redundant
             if self._is_action_redundant(agent_id, action_name, parameters):
-                logger.info(f"[{self.service_id}] Skipping redundant action command '{action_name}' to agent '{agent_id}'")
+                logger.info(f"[{self.service_id}] Skipping redundant action command '{action_name}' to agent '{agent_id}' (5s cooldown active)")
                 return
             
             # Create applyAction event
@@ -606,6 +617,30 @@ class ContextRuleManager:
             
         except Exception as e:
             logger.error(f"[{self.service_id}] Error sending action command to {agent_id}: {e}", exc_info=True)
+
+    def get_extended_window_status(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """Get the current extended window status for debugging purposes."""
+        with self.extended_window_lock:
+            window_info = self.extended_window_agents.get(agent_id)
+            if not window_info:
+                return None
+            
+            current_time = time.time()
+            time_since_last_extend = current_time - window_info["last_extend_time"]
+            remaining_time = self.EXTENDED_WINDOW_DURATION - time_since_last_extend
+            total_window_time = current_time - window_info["start_time"]
+            
+            return {
+                "agent_id": agent_id,
+                "window_start": window_info["start_time"],
+                "last_extend": window_info["last_extend_time"],
+                "current_time": current_time,
+                "time_since_last_extend": time_since_last_extend,
+                "remaining_time": remaining_time,
+                "total_window_time": total_window_time,
+                "duration": self.EXTENDED_WINDOW_DURATION,
+                "is_expired": time_since_last_extend >= self.EXTENDED_WINDOW_DURATION
+            }
 
     def evaluate_rules(self, agent_id: str, current_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -1265,4 +1300,47 @@ class ContextRuleManager:
             logger.info(f"[{self.service_id}] Published sensor config command result: {command_id} - {success}")
             
         except Exception as e:
-            logger.error(f"[{self.service_id}] Error publishing sensor config command result: {e}") 
+            logger.error(f"[{self.service_id}] Error publishing sensor config command result: {e}")
+
+    def test_extended_window_timing(self, agent_id: str = "test_agent") -> None:
+        """Manual test method to verify extended window timing logic."""
+        import time
+        
+        logger.info(f"[{self.service_id}] TESTING: Starting extended window timing test for '{agent_id}'")
+        logger.info(f"[{self.service_id}] TESTING: EXTENDED_WINDOW_DURATION = {self.EXTENDED_WINDOW_DURATION}s")
+        
+        # Simulate OFF → ON transition
+        result1 = self._apply_extended_window_logic(agent_id, "off", "on")
+        logger.info(f"[{self.service_id}] TESTING: OFF → ON result: {result1}")
+        
+        # Check window status immediately
+        status1 = self.get_extended_window_status(agent_id)
+        logger.info(f"[{self.service_id}] TESTING: Immediate window status: {status1}")
+        
+        # Wait 5 seconds and test "off" decision
+        time.sleep(5)
+        result2 = self._apply_extended_window_logic(agent_id, "on", "off")
+        status2 = self.get_extended_window_status(agent_id)
+        logger.info(f"[{self.service_id}] TESTING: After 5s, rule says OFF, result: {result2}")
+        logger.info(f"[{self.service_id}] TESTING: After 5s window status: {status2}")
+        
+        # Wait another 30 seconds and test again
+        time.sleep(30)
+        result3 = self._apply_extended_window_logic(agent_id, "on", "off")
+        status3 = self.get_extended_window_status(agent_id)
+        logger.info(f"[{self.service_id}] TESTING: After 35s total, rule says OFF, result: {result3}")
+        logger.info(f"[{self.service_id}] TESTING: After 35s window status: {status3}")
+        
+        # Wait another 30 seconds (65s total) and test expiration
+        time.sleep(30)
+        result4 = self._apply_extended_window_logic(agent_id, "on", "off")
+        status4 = self.get_extended_window_status(agent_id)
+        logger.info(f"[{self.service_id}] TESTING: After 65s total, rule says OFF, result: {result4}")
+        logger.info(f"[{self.service_id}] TESTING: After 65s window status: {status4}")
+        
+        # Clean up test
+        with self.extended_window_lock:
+            if agent_id in self.extended_window_agents:
+                del self.extended_window_agents[agent_id]
+        
+        logger.info(f"[{self.service_id}] TESTING: Extended window timing test completed") 
