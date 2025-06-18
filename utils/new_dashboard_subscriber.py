@@ -42,6 +42,7 @@ class EnhancedDashboardSubscriber:
         
         # 모든 센서 데이터를 저장할 통합 딕셔너리
         self.all_sensors = {}
+        self.all_agents = {}
         
         # 명령 관련
         self.command_results = {}  # 명령 결과 저장
@@ -172,13 +173,13 @@ class EnhancedDashboardSubscriber:
                     payload = message_data["payload"]
                     self.context_data = payload
                     self.last_context_update = time.time()
-                    
+                    self.all_agents = payload.get('agents', {})
+
                     # Extract door and chair sensors
                     self._extract_sensor_data(payload)
 
                     # Check and store light agent information
-                    agents = payload.get('agents', {})
-                    for agent_id, agent_data in agents.items():
+                    for agent_id, agent_data in self.all_agents.items():
                         if agent_data.get('agent_type') == 'hue_light':
                             # Save the current state of the light agent
                             hue_light_data = agent_data.get('state', {}).get('power', {})
@@ -326,10 +327,8 @@ class EnhancedDashboardSubscriber:
         
         # Check if agents data exists
         if 'agents' in payload:
-            agents = payload.get('agents', {})
-            
             # Iterate through each agent
-            for agent_id, agent_data in agents.items():
+            for agent_id, agent_data in self.all_agents.items():
                 # Check the agent's sensor data
                 sensors = agent_data.get('sensors', {})
                 
@@ -810,6 +809,9 @@ class EnhancedDashboardSubscriber:
         """모든 센서 데이터를 하나의 딕셔너리로 반환합니다."""
         # 저장된 모든 센서 데이터 반환
         return self.all_sensors.copy()
+
+    def get_all_agents(self):
+        return self.all_agents.copy()
 
 def main():
     """Main function to run the enhanced dashboard subscriber."""

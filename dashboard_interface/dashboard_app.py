@@ -9,6 +9,9 @@ import streamlit as st
 from st_bridge import bridge
 
 def main():
+    TARGET_LIGHT_AGENT_ID = "hue_light"
+    TARGET_AC_AGENT_ID = "aircon"
+
     # Timer for periodic auto update
     if 'last_update_time' not in st.session_state:
         st.session_state.last_update_time = time.time()
@@ -83,36 +86,27 @@ def main():
     db = get_event_db()  # Initialize the event database connection
 
     # --- UI Layout: Main content area and right control column ---
-    col1, controls_col = st.columns([0.85, 0.15])
+    col1, col2 = st.columns([0.85, 0.15])
     main_content_col = col1.empty()
 
-    with controls_col:
+    with col2:
         st.subheader("Control")
-
-        # Use only the default light
-        TARGET_LIGHT_AGENT_ID = "hue_light"  # 기본 조명 ID
-
-        # --- Light Control Buttons ---
-        if st.button("💡 ON", key="light_on_button", use_container_width=True):
-            if client and TARGET_LIGHT_AGENT_ID:
-                st.info("Turning on...")
-                command_id = client.send_command(agent_id=TARGET_LIGHT_AGENT_ID, action_name="turn_on")
-                if command_id:
-                    st.toast("Turned on", icon="✅")
-
-        st.write("")  # 간격 추가
-
-        if st.button("⚫ OFF", key="light_off_button", use_container_width=True):
-            if client and TARGET_LIGHT_AGENT_ID:
-                st.info("Turning off...")
-                command_id = client.send_command(agent_id=TARGET_LIGHT_AGENT_ID, action_name="turn_off")
-                if command_id:
-                    st.toast("Turned off", icon="✅")
+    col21, col22 = col2.columns([0.2, 0.8])
+    light_icon = col21.empty()
+    light_btn = col22.empty()
+    with col21:
+        st.write("")
+    with col22:
+        st.write("")
+    ac_icon = col21.empty()
+    ac_btn = col22.empty()
 
     clicked_sensor = bridge("sensor-id-bridge", default="")
-    last_svg = "";
+    last_svg = ""
     if clicked_sensor:
         st.write(f"Clicked sensor ID: {clicked_sensor}")
+    light_switch = light_btn.button("Light Switch", key="light_switch", use_container_width=True)
+    ac_switch = ac_btn.button("AC Switch", key="ac_switch", use_container_width=True)
 
     while True:
         all_sensors = client.get_all_sensors() if client else {}
@@ -122,9 +116,34 @@ def main():
                 last_svg = meeting_room_svg
                 with main_content_col:
                     st.components.v1.html(meeting_room_svg, height=1000, scrolling=False)
-        else:  # If there is no sensor data
+        else:
             with main_content_col:
                 st.info("Waiting to receive meeting room status information...")
+
+
+        all_agents = client.get_all_agents() if client else {}
+        if all_agents:
+            power_state = all_agents[TARGET_LIGHT_AGENT_ID].get('state', {}).get('power', 'unknown')
+            with light_icon:
+                st.markdown(
+                    f"<div style='display: flex; align-items: center; height: 100%; justify-content: center; font-size: 2em;'>{'💡' if power_state == 'on' else '⚫'}</div>",
+                    unsafe_allow_html=True
+                )
+            if light_switch and power_state == "off":
+                client.send_command(TARGET_LIGHT_AGENT_ID, "turn_on")
+            elif light_switch and power_state == "on":
+                client.send_command(TARGET_LIGHT_AGENT_ID, "turn_off")
+
+            power_state = all_agents[TARGET_AC_AGENT_ID].get('state', {}).get('power', 'unknown')
+            with ac_icon:
+                st.markdown(
+                    f"<div style='display: flex; align-items: center; height: 100%; justify-content: center; font-size: 2em;'>{'❄️' if power_state == 'on' else '⚫'}</div>",
+                    unsafe_allow_html=True
+                )
+            if ac_switch and power_state == "off":
+                client.send_command(TARGET_AC_AGENT_ID, "turn_on")
+            elif ac_switch and power_state == "on":
+                client.send_command(TARGET_AC_AGENT_ID, "turn_off")
 
         time.sleep(1)
 
