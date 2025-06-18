@@ -50,15 +50,18 @@ class MeetingRoomDesign:
     height = 10 * cell_h
 
     def __init__(self):
-        self.activity_color = "#4CAF50"
-        self.activity_empty_color = "#BDBDBD"
-        self.motion_color = "#FFE0B2"
-        self.infrared_color = "#FFB1C1"
-        self.temp_color = "#2196F3"
-        self.light_color = "#FFD600"
-        self.door_color = "#3F51B5"
-        self.tv_color = "#212121"
-        self.ac_color = "#00BCD4"
+        self.activity_color = "#F5F7FA"         # Chair (almost white)
+        self.activity_empty_color = "#B0BEC5"   # Empty chair (soft gray)
+        self.motion_color = "#FFD166"           # Motion (amber)
+        self.infrared_color = "#EF476F"         # Infrared (magenta-red)
+        self.temp_color = "#118AB2"             # Temperature (blue)
+        self.light_color = "#FFD600"            # Light (bright yellow)
+        self.door_color = "#073B4C"             # Door (navy)
+        self.tv_color = "#222831"               # TV (slate)
+        self.ac_color = "#06D6A0"               # AC (teal)
+        #self.background_color = "#222"       # Background (deep charcoal)
+        self.text_color = "#000000"                # Default text (dark)
+        #self.text_color_dark_bg = "#FFF"        # For dark backgrounds
 
     def generate_meeting_room_svg(self, sensors=None):
         if sensors is None:
@@ -204,16 +207,16 @@ class MeetingRoomDesign:
 
             if eid.startswith('activity'):
                 svg.append(f'<circle cx="{x}" cy="{y}" r="28" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"></circle>')
-                svg.append(f'<text x="{x}" y="{y+5}" font-size="15" text-anchor="middle" fill="#fff">{label}</text>')
+                svg.append(f'<text x="{x}" y="{y+5}" font-size="15" text-anchor="middle" fill="#222">{label}</text>')
             elif eid.startswith('motion'):
                 svg.append(f'<rect x="{x-18}" y="{y-18}" width="36" height="36" rx="8" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
-                svg.append(f'<text x="{x}" y="{y+5}" font-size="14" text-anchor="middle" fill="#fff">{label}</text>')
+                svg.append(f'<text x="{x}" y="{y+5}" font-size="14" text-anchor="middle" fill="#222">{label}</text>')
             elif eid.startswith('infrared'):
                 svg.append(f'<ellipse cx="{x}" cy="{y}" rx="20" ry="14" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
-                svg.append(f'<text x="{x}" y="{y+5}" font-size="14" text-anchor="middle" fill="#fff">{label}</text>')
+                svg.append(f'<text x="{x}" y="{y+5}" font-size="14" text-anchor="middle" fill="#222">{label}</text>')
             elif eid.startswith('temperature'):
                 svg.append(f'<rect x="{x-22}" y="{y-22}" width="44" height="44" rx="10" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
-                svg.append(f'<text x="{x}" y="{y+7}" font-size="14" text-anchor="middle" fill="#fff">{label}</text>')
+                svg.append(f'<text x="{x}" y="{y+7}" font-size="14" text-anchor="middle" fill="#222">{label}</text>')
             elif eid.startswith('light'):
                 svg.append(f'<circle cx="{x}" cy="{y}" r="18" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
                 svg.append(f'<text x="{x}" y="{y+5}" font-size="14" text-anchor="middle" fill="#222">{label}</text>')
@@ -222,6 +225,6 @@ class MeetingRoomDesign:
                 svg.append(f'<text x="{x}" y="{y+8}" font-size="16" text-anchor="middle" fill="#fff">{label}</text>')
             elif eid.startswith('AC'):
                 svg.append(f'<rect x="{x-35}" y="{y-35}" width="70" height="70" rx="16" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
-                svg.append(f'<text x="{x}" y="{y+10}" font-size="18" text-anchor="middle" fill="#fff">{label}</text>')
+                svg.append(f'<text x="{x}" y="{y+10}" font-size="18" text-anchor="middle" fill="#222">{label}</text>')
         svg.append('</svg>')
         return ''.join(svg)
