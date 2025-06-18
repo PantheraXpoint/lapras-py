@@ -250,11 +250,11 @@ class ContextRuleManager:
             action_event = EventFactory.create_action_event(
                 virtual_agent_id=agent_id,
                 action_name=action_name,
-                parameters=parameters,
+                parameters={**parameters, "skip_verification": True} if parameters else {"skip_verification": True},
                 priority=priority
             )
             
-            # Send to virtual agent
+            # Send to virtual agent using direct MQTT publish for manual commands (bypass redundancy check)
             action_topic = TopicManager.context_to_virtual_action(agent_id)
             action_message = MQTTMessage.serialize(action_event)
             publish_result = self.mqtt_client.publish(action_topic, action_message, qos=1)
@@ -496,7 +496,7 @@ class ContextRuleManager:
                     "duration": self.EXTENDED_WINDOW_DURATION,
                     "last_extend_time": current_time
                 }
-                logger.info(f"[{self.service_id}] Started {self.EXTENDED_WINDOW_DURATION}s extended window for '{agent_id}' at {current_time}")
+                logger.info(f"[{self.service_id}] Started {self.EXTENDED_WINDOW_DURATION}s extended window for '{agent_id}'")
                 return "on"
             
             # Case 2: No active window, follow raw decision
@@ -508,11 +508,6 @@ class ContextRuleManager:
             window_start = window_info["start_time"]
             last_extend = window_info["last_extend_time"]
             time_since_last_extend = current_time - last_extend
-            total_window_time = current_time - window_start
-            
-            # Enhanced logging for debugging
-            logger.info(f"[{self.service_id}] Extended window debug for '{agent_id}': current_time={current_time:.3f}, window_start={window_start:.3f}, last_extend={last_extend:.3f}")
-            logger.info(f"[{self.service_id}] Extended window timing for '{agent_id}': time_since_last_extend={time_since_last_extend:.1f}s, total_window_time={total_window_time:.1f}s, duration={self.EXTENDED_WINDOW_DURATION}s")
             
             # Window expired?
             if time_since_last_extend >= self.EXTENDED_WINDOW_DURATION:
@@ -525,13 +520,13 @@ class ContextRuleManager:
             if raw_rule_decision == "on":
                 self.extended_window_agents[agent_id]["last_extend_time"] = current_time
                 remaining_time = self.EXTENDED_WINDOW_DURATION - time_since_last_extend
-                logger.info(f"[{self.service_id}] Extended window for '{agent_id}' (was {remaining_time:.1f}s remaining, now reset to {self.EXTENDED_WINDOW_DURATION}s)")
+                logger.debug(f"[{self.service_id}] Extended window for '{agent_id}' (reset to {self.EXTENDED_WINDOW_DURATION}s)")
                 return "on"
             
             # Case 5: Active window, rule says "off" - continue countdown, stay on
             else:
                 remaining_time = self.EXTENDED_WINDOW_DURATION - time_since_last_extend
-                logger.info(f"[{self.service_id}] Rule says 'off' for '{agent_id}', but in extended window ({remaining_time:.1f}s remaining) - staying on")
+                logger.debug(f"[{self.service_id}] Rule says 'off' for '{agent_id}', but in extended window ({remaining_time:.1f}s remaining) - staying on")
                 return "on"
 
     def _determine_actions_from_state_change(self, old_state: Dict[str, Any], new_state: Dict[str, Any]) -> list:
@@ -561,7 +556,7 @@ class ContextRuleManager:
         
         return actions
 
-    def _is_action_redundant(self, agent_id: str, action_name: str, parameters: Optional[Dict[str, Any]] = None) -> bool:
+    def _is_action_redundant(self, agent_id: str, action_name: str, parameters: Optional[Dict[str, Any]] = None, is_manual: bool = False) -> bool:
         """Check if this action command is redundant (same as the last one sent)."""
         with self.action_command_lock:
             if agent_id not in self.last_action_commands:
@@ -573,10 +568,11 @@ class ContextRuleManager:
             if (last_command.get("action_name") == action_name and 
                 last_command.get("parameters") == parameters):
                 
-                # Also check if it was sent recently (within last 5 seconds)
-                # This prevents sending the same command due to rapid sensor updates
+                # Reduced cooldown time for faster response
+                # Manual commands get shorter cooldown than automatic rules
+                cooldown_time = 0.5 if is_manual else 1.0  # 0.5s for manual, 1s for rules
                 time_since_last = time.time() - last_command.get("timestamp", 0)
-                if time_since_last < 5.0:  # 5 second cooldown
+                if time_since_last < cooldown_time:
                     return True  # Redundant
             
             return False  # Not redundant
@@ -590,12 +586,13 @@ class ContextRuleManager:
                 "timestamp": time.time()
             }
 
-    def _send_action_command(self, agent_id: str, action_name: str, parameters: Optional[Dict[str, Any]] = None):
+    def _send_action_command(self, agent_id: str, action_name: str, parameters: Optional[Dict[str, Any]] = None, is_manual: bool = False):
         """Send an action command to a VirtualAgent (SYNCHRONOUS - Request)."""
         try:
             # Check if this action command is redundant
-            if self._is_action_redundant(agent_id, action_name, parameters):
-                logger.info(f"[{self.service_id}] Skipping redundant action command '{action_name}' to agent '{agent_id}' (5s cooldown active)")
+            if self._is_action_redundant(agent_id, action_name, parameters, is_manual):
+                cooldown_time = 0.5 if is_manual else 1.0
+                logger.info(f"[{self.service_id}] Skipping redundant action command '{action_name}' to agent '{agent_id}' ({cooldown_time}s cooldown active)")
                 return
             
             # Create applyAction event
@@ -1133,8 +1130,8 @@ class ContextRuleManager:
             action_event = EventFactory.create_action_event(
                 virtual_agent_id=agent_id,
                 action_name=action_name,
-                parameters=parameters,
-                priority=priority  # Manual commands typically get higher priority
+                parameters={**parameters, "skip_verification": True} if parameters else {"skip_verification": True},
+                priority=priority
             )
             
             # Send via MQTT to the specific agent

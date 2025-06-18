@@ -457,14 +457,14 @@ class LightHueAgent(VirtualAgent):
                 }
         return ret
 
-    def __verify_action_result(self, expected_state: str, max_retries: int = 3, retry_delay: float = 1.0) -> tuple:
+    def __verify_action_result(self, expected_state: str, max_retries: int = 2, retry_delay: float = 0.5) -> tuple:
         """
         Verify that the light state matches the expected state after an action.
         
         Args:
             expected_state: Expected power state ("on" or "off")
-            max_retries: Maximum number of verification attempts
-            retry_delay: Delay between verification attempts in seconds
+            max_retries: Maximum number of verification attempts (reduced for faster response)
+            retry_delay: Delay between verification attempts in seconds (reduced for faster response)
             
         Returns:
             Tuple of (success: bool, actual_state: str, message: str)
@@ -493,30 +493,42 @@ class LightHueAgent(VirtualAgent):
         """Execute light control actions and verify actual state before reporting back."""
         logger.info(f"[{self.agent_id}] Executing action: {action_payload.actionName}")
         
+        # Check if verification should be skipped for faster response
+        # For manual commands or when explicitly disabled
+        skip_verification = action_payload.parameters and action_payload.parameters.get("skip_verification", False)
+        
         try:            
             if action_payload.actionName == "turn_on":
                 # Execute the physical action first
                 result = self.__turn_on_light()
                 
-                # Verify actual light state with retry logic
-                verification_success, actual_state, verification_message = self.__verify_action_result("on")
-                
-                logger.info(f"[{self.agent_id}] Turn ON command executed, {verification_message}")
-                
-                # Update local state based on verified actual state
-                with self.state_lock:
-                    old_power_state = self.local_state.get("power")
-                    self.local_state["power"] = actual_state
+                if skip_verification:
+                    # Skip verification for faster response
+                    logger.info(f"[{self.agent_id}] Turn ON command executed (verification skipped for speed)")
+                    with self.state_lock:
+                        self.local_state["power"] = "on"
+                        result["new_state"]["power"] = "on"
+                        result["message"] = "Turn ON: executed (verification skipped)"
+                else:
+                    # Verify actual light state with retry logic
+                    verification_success, actual_state, verification_message = self.__verify_action_result("on")
                     
-                    # Update result with verified state
-                    result["new_state"]["power"] = actual_state
-                    result["success"] = verification_success
-                    result["message"] = f"Turn ON: {verification_message}"
+                    logger.info(f"[{self.agent_id}] Turn ON command executed, {verification_message}")
                     
-                    if verification_success:
-                        logger.info(f"[{self.agent_id}] Light turned ON successfully (verified)")
-                    else:
-                        logger.warning(f"[{self.agent_id}] Light turn ON verification failed: {verification_message}")
+                    # Update local state based on verified actual state
+                    with self.state_lock:
+                        old_power_state = self.local_state.get("power")
+                        self.local_state["power"] = actual_state
+                        
+                        # Update result with verified state
+                        result["new_state"]["power"] = actual_state
+                        result["success"] = verification_success
+                        result["message"] = f"Turn ON: {verification_message}"
+                        
+                        if verification_success:
+                            logger.info(f"[{self.agent_id}] Light turned ON successfully (verified)")
+                        else:
+                            logger.warning(f"[{self.agent_id}] Light turn ON verification failed: {verification_message}")
                 
                 # Always trigger state publication with verified state
                 self._trigger_state_publication()
@@ -525,25 +537,33 @@ class LightHueAgent(VirtualAgent):
                 # Execute the physical action first
                 result = self.__turn_off_light()
                 
-                # Verify actual light state with retry logic
-                verification_success, actual_state, verification_message = self.__verify_action_result("off")
-                
-                logger.info(f"[{self.agent_id}] Turn OFF command executed, {verification_message}")
-                
-                # Update local state based on verified actual state
-                with self.state_lock:
-                    old_power_state = self.local_state.get("power")
-                    self.local_state["power"] = actual_state
+                if skip_verification:
+                    # Skip verification for faster response
+                    logger.info(f"[{self.agent_id}] Turn OFF command executed (verification skipped for speed)")
+                    with self.state_lock:
+                        self.local_state["power"] = "off"
+                        result["new_state"]["power"] = "off"
+                        result["message"] = "Turn OFF: executed (verification skipped)"
+                else:
+                    # Verify actual light state with retry logic
+                    verification_success, actual_state, verification_message = self.__verify_action_result("off")
                     
-                    # Update result with verified state
-                    result["new_state"]["power"] = actual_state
-                    result["success"] = verification_success
-                    result["message"] = f"Turn OFF: {verification_message}"
+                    logger.info(f"[{self.agent_id}] Turn OFF command executed, {verification_message}")
                     
-                    if verification_success:
-                        logger.info(f"[{self.agent_id}] Light turned OFF successfully (verified)")
-                    else:
-                        logger.warning(f"[{self.agent_id}] Light turn OFF verification failed: {verification_message}")
+                    # Update local state based on verified actual state
+                    with self.state_lock:
+                        old_power_state = self.local_state.get("power")
+                        self.local_state["power"] = actual_state
+                        
+                        # Update result with verified state
+                        result["new_state"]["power"] = actual_state
+                        result["success"] = verification_success
+                        result["message"] = f"Turn OFF: {verification_message}"
+                        
+                        if verification_success:
+                            logger.info(f"[{self.agent_id}] Light turned OFF successfully (verified)")
+                        else:
+                            logger.warning(f"[{self.agent_id}] Light turn OFF verification failed: {verification_message}")
                 
                 # Always trigger state publication with verified state
                 self._trigger_state_publication()
