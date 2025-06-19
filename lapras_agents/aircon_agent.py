@@ -50,12 +50,9 @@ class AirconAgent(VirtualAgent):
         self.phidget_serial = phidget_serial
         self._initialize_ir_controller()
         
-        # Ensure aircon starts in known "off" state by sending turn off command
-        initial_power_state = self.__ensure_aircon_off_on_startup()
-        
         # Initialize local state with known state
         self.local_state.update({
-            "power": initial_power_state,
+            "power": "off",
             "temperature": 25,  # Default temperature setting
             "mode": "auto",     # auto, cool, heat, fan
             "proximity_status": "unknown",
@@ -63,8 +60,6 @@ class AirconAgent(VirtualAgent):
             "activity_status": "unknown",
             "activity_detected": False,
         })
-        
-        logger.info(f"[{self.agent_id}] Initialized with ensured aircon state: {initial_power_state}")
         
         self.sensor_data = defaultdict(dict)  # Store sensor data with sensor_id as key
         
@@ -87,25 +82,6 @@ class AirconAgent(VirtualAgent):
         except Exception as e:
             logger.error(f"[{self.agent_id}] Failed to initialize IR controller: {e}")
             self.ir_controller = None
-    
-    def __ensure_aircon_off_on_startup(self):
-        """Ensure the aircon starts in known "off" state by sending turn off command."""
-        try:
-            logger.info(f"[{self.agent_id}] Ensuring aircon is OFF at startup...")
-            
-            # Send turn off command to ensure aircon is off
-            result = self.__turn_off_aircon()
-            
-            if result["success"]:
-                logger.info(f"[{self.agent_id}] Aircon turned OFF successfully during initialization")
-                return "off"
-            else:
-                logger.warning(f"[{self.agent_id}] Failed to turn off aircon during initialization: {result.get('message')}")
-                return "off"  # Still assume off state even if command failed
-                
-        except Exception as e:
-            logger.error(f"[{self.agent_id}] Error ensuring aircon OFF state during initialization: {e}")
-            return "off"  # Default to off state if error occurs
     
     def _configure_sensors(self):
         """Configure sensors based on the sensor_config."""
