@@ -51,7 +51,7 @@ class MonnitSensorAgent(SensorAgent, ABC):
         self.monnit_sensors: List[Dict] = []
         self.sensor_cache: Dict[int, Dict] = {}
         self.sensors_ready = threading.Event()
-        self.reading_interval = 1.0  # Default 1 seconds for Monnit sensors
+        self.reading_interval = 0.1  # Default 0.1 seconds for Monnit sensors
         
         # Add mapping from sensor_id to friendly_id for consistent naming
         self.sensor_id_mapping: Dict[int, str] = {}

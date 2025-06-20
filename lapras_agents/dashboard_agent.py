@@ -21,10 +21,12 @@ logger = logging.getLogger(__name__)
 class DashboardAgent(VirtualAgent):
     def __init__(self, agent_id: str = "dashboard", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, 
                  sensor_config: dict = None, transmission_interval: float = 2.0):
-        super().__init__(agent_id, "dashboard", mqtt_broker, mqtt_port)
         
-        logger.info(f"[{self.agent_id}] DashboardAgent initialized")
-
+        # Initialize attributes that might be accessed by perception thread first
+        self.transmission_interval = transmission_interval  # seconds between transmissions
+        self.last_transmission_time = 0.0
+        self.pending_state_update = False
+        
         # Default comprehensive sensor configuration 
         if sensor_config is None:
             sensor_config = {
@@ -33,17 +35,21 @@ class DashboardAgent(VirtualAgent):
                 "temperature": ["temperature_1", "temperature_2","temperature_3"],
                 "door": ["door_01"],
                 "activity": ["activity_s1b", "activity_s2a", "activity_s3a", "activity_s4a","activity_s5a","activity_s6a","activity_s7a","activity_s2b","activity_s3b","activity_s4b","activity_s5b","activity_s6b","activity_s7b"],
-                "light": ["light_1"]  # Add light sensors - will be populated if available
+                "light": ["light_1"],  # Add light sensors - will be populated if available
+                "tilt": ["tilt_1", "tilt_2"]  # Add both tilt sensors for aircon monitoring
             }
         
         self.sensor_config = sensor_config
-        self.supported_sensor_types = ["infrared", "motion", "temperature", "door", "activity", "light"]
-
-        # Transmission rate control (slower than light agent since this is for monitoring)
-        self.transmission_interval = transmission_interval  # seconds between transmissions
-        self.last_transmission_time = 0.0
-        self.pending_state_update = False
+        self.supported_sensor_types = ["infrared", "motion", "temperature", "door", "activity", "light", "tilt"]
         
+        # Store sensor data with timestamps for staleness detection
+        self.sensor_data = defaultdict(dict)  # sensor_id -> sensor_data
+        self.sensor_last_seen = defaultdict(float)  # sensor_id -> timestamp
+        
+        super().__init__(agent_id, "dashboard", mqtt_broker, mqtt_port)
+        
+        logger.info(f"[{self.agent_id}] DashboardAgent initialized")
+
         # Initialize local state for dashboard monitoring
         self.local_state.update({
             "dashboard_status": "active",
@@ -57,13 +63,10 @@ class DashboardAgent(VirtualAgent):
                 "temperature_alerts": 0,
                 "doors_open": 0,
                 "activity_detected": 0,
-                "light_alerts": 0
+                "light_alerts": 0,
+                "tilt_alerts": 0
             }
         })
-        
-        # Store sensor data with timestamps for staleness detection
-        self.sensor_data = defaultdict(dict)  # sensor_id -> sensor_data
-        self.sensor_last_seen = defaultdict(float)  # sensor_id -> timestamp
         
         # Dynamically add sensors based on configuration
         self._configure_sensors()
@@ -140,6 +143,8 @@ class DashboardAgent(VirtualAgent):
             self._process_activity_sensor(sensor_payload, sensor_id, current_time)
         elif sensor_payload.sensor_type == "light":
             self._process_light_sensor(sensor_payload, sensor_id, current_time)
+        elif sensor_payload.sensor_type == "tilt":
+            self._process_tilt_sensor(sensor_payload, sensor_id, current_time)
         else:
             logger.warning(f"[{self.agent_id}] Unsupported sensor type: {sensor_payload.sensor_type}")
             
@@ -218,6 +223,17 @@ class DashboardAgent(VirtualAgent):
                 "last_update": current_time
             }
     
+    def _process_tilt_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
+        """Process tilt sensor updates."""
+        with self.state_lock:
+            self.sensor_data[sensor_id] = {
+                "sensor_type": sensor_payload.sensor_type,
+                "value": sensor_payload.value,
+                "unit": sensor_payload.unit,
+                "metadata": sensor_payload.metadata,
+                "last_update": current_time
+            }
+    
     def _update_activity_summary(self):
         """Update the activity summary based on all sensor data."""
         current_time = time.time()
@@ -229,7 +245,8 @@ class DashboardAgent(VirtualAgent):
             
             for sensor_id in self.sensor_config.get("infrared", []) + self.sensor_config.get("motion", []) + \
                            self.sensor_config.get("temperature", []) + self.sensor_config.get("door", []) + \
-                           self.sensor_config.get("activity", []) + self.sensor_config.get("light", []):
+                           self.sensor_config.get("activity", []) + self.sensor_config.get("light", []) + \
+                           self.sensor_config.get("tilt", []):
                 if sensor_id in self.sensor_last_seen:
                     if current_time - self.sensor_last_seen[sensor_id] < 30:
                         sensors_online += 1
@@ -266,6 +283,10 @@ class DashboardAgent(VirtualAgent):
                              if sensor_id in self.sensor_data and
                              self.sensor_data[sensor_id].get("metadata", {}).get("light_status") in ["bright", "dark"])
             
+            tilt_alerts = sum(1 for sensor_id in self.sensor_config.get("tilt", [])
+                             if sensor_id in self.sensor_data and
+                             self.sensor_data[sensor_id].get("metadata", {}).get("tilt_status") in ["tilted", "level"])
+            
             # Update activity summary
             self.local_state["activity_summary"] = {
                 "infrared_active": infrared_active,
@@ -273,7 +294,8 @@ class DashboardAgent(VirtualAgent):
                 "temperature_alerts": temperature_alerts,
                 "doors_open": doors_open,
                 "activity_detected": activity_detected,
-                "light_alerts": light_alerts
+                "light_alerts": light_alerts,
+                "tilt_alerts": tilt_alerts
             }
             
             # Update last activity time if any activity detected
@@ -320,7 +342,8 @@ class DashboardAgent(VirtualAgent):
                 logger.info(f"[{self.agent_id}] Dashboard summary - Online: {self.local_state.get('sensors_online', 0)}/{self.local_state.get('total_sensors', 0)}, "
                            f"Activity: IR={summary.get('infrared_active', 0)}, Motion={summary.get('motion_active', 0)}, "
                            f"Temp alerts={summary.get('temperature_alerts', 0)}, Doors open={summary.get('doors_open', 0)}, "
-                           f"Activity={summary.get('activity_detected', 0)}, Light alerts={summary.get('light_alerts', 0)}")
+                           f"Activity={summary.get('activity_detected', 0)}, Light alerts={summary.get('light_alerts', 0)}, "
+                           f"Tilt alerts={summary.get('tilt_alerts', 0)}")
             self._last_perception_log = current_time
     
     def _clean_data_for_serialization(self, data):

@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 
 class LightHueAgent(VirtualAgent):
     def __init__(self, agent_id: str = "hue_light", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, 
-                 sensor_config: dict = None, transmission_interval: float = 0.5):
+                 sensor_config: dict = None, transmission_interval: float = 0.1, 
+                 light_threshold: float = 50.0):
         super().__init__(agent_id, "hue_light", mqtt_broker, mqtt_port)
         
         logger.info(f"[{self.agent_id}] LightHueAgent initialized")
@@ -26,32 +27,43 @@ class LightHueAgent(VirtualAgent):
         # Default sensor configuration if none provided
         if sensor_config is None:
             sensor_config = {
-                "infrared": ["infrared_1", "infrared_2"]  # Default to infrared sensors
+                "infrared": ["infrared_1", "infrared_2"],  # Default to infrared sensors
+                "light": ["light_1"]  # Add light sensor support
             }
         
         self.sensor_config = sensor_config
-        self.supported_sensor_types = ["infrared", "motion", "activity"]
+        self.supported_sensor_types = ["infrared", "motion", "activity", "light"]
+
+        # Light sensor configuration for bright/dark classification
+        self.light_threshold = light_threshold  # lux threshold: below = dark, above = bright
 
         # Transmission rate control
         self.transmission_interval = transmission_interval  # seconds between transmissions
         self.last_transmission_time = 0.0
         self.pending_state_update = False
         
-        # Initialize local state - no timing logic
+        # Initialize local state - check actual light status first
+        actual_power_state = self.__check_current_light_state()
         self.local_state.update({
-            "power": "on",
+            "power": actual_power_state,
             "proximity_status": "unknown",
             "motion_status": "unknown", 
             "activity_status": "unknown",
             "activity_detected": False,
+            "light_status": "unknown",  # bright or dark
         })
+        
+        logger.info(f"[{self.agent_id}] Initialized with actual light state: {actual_power_state}")
         
         self.sensor_data = defaultdict(dict)  # Store sensor data with sensor_id as key
         
         # Dynamically add sensors based on configuration
         self._configure_sensors()
         
-        logger.info(f"[{self.agent_id}] LightHueAgent initialization completed with sensors: {sensor_config} and transmission interval: {transmission_interval}s")
+        logger.info(f"[{self.agent_id}] LightHueAgent initialization completed with sensors: {sensor_config}, transmission interval: {transmission_interval}s, light threshold: {light_threshold} lux")
+
+        # Publish initial state to context manager
+        self._trigger_initial_state_publication()
     
     def _configure_sensors(self):
         """Configure sensors based on the sensor_config."""
@@ -110,6 +122,8 @@ class LightHueAgent(VirtualAgent):
             self._process_motion_sensor(sensor_payload, sensor_id, current_time)
         elif sensor_payload.sensor_type == "activity":
             self._process_activity_sensor(sensor_payload, sensor_id, current_time)
+        elif sensor_payload.sensor_type == "light":
+            self._process_light_sensor(sensor_payload, sensor_id, current_time)
         else:
             logger.warning(f"[{self.agent_id}] Unsupported sensor type: {sensor_payload.sensor_type}")
     
@@ -208,6 +222,33 @@ class LightHueAgent(VirtualAgent):
 
             # Update activity_detected field for rules
             self._update_activity_detected()
+
+            # Rate-limited state publication to context manager
+            self._schedule_transmission()
+    
+    def _process_light_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
+        """Process light sensor updates and convert lux to bright/dark terms."""
+        with self.state_lock:
+            # Update sensor data
+            self.sensor_data[sensor_id] = {
+                "sensor_type": sensor_payload.sensor_type,
+                "value": sensor_payload.value,
+                "unit": sensor_payload.unit,
+                "metadata": sensor_payload.metadata,
+            }
+
+            # Convert lux value to bright/dark based on threshold
+            try:
+                lux_value = float(sensor_payload.value)
+                light_status = "bright" if lux_value >= self.light_threshold else "dark"
+                
+                if self.local_state.get("light_status") != light_status:
+                    self.local_state["light_status"] = light_status
+                    logger.info(f"[{self.agent_id}] Updated light_status to: {light_status} (lux: {lux_value})")
+                
+            except (ValueError, TypeError) as e:
+                logger.warning(f"[{self.agent_id}] Could not convert light sensor value to float: {sensor_payload.value}, error: {e}")
+                return
 
             # Rate-limited state publication to context manager
             self._schedule_transmission()
@@ -344,6 +385,59 @@ class LightHueAgent(VirtualAgent):
         
         # logger.info(f"[{self.agent_id}] DEBUG: _update_sensor_data completed for sensor {sensor_id}")
 
+    def __check_current_light_state(self):
+        """Check the current state of the lights from the Hue bridge."""
+        # Replace with your bridge IP and API username
+        # NOTE(YH): hardcode for now
+        BRIDGE_IP = "143.248.55.137:10090"
+        USERNAME = "P2laHGvjzthn7Ip5-fAAIbVB9ulu9OlHWk8L7Yex"
+        BASE_URL = f"http://{BRIDGE_IP}/api/{USERNAME}"
+        
+        try:
+            # Check the state of all lights (0-10)
+            idxs = list(range(0, 8))
+            lights_on = 0
+            total_lights = 0
+            
+            for idx in idxs:
+                try:
+                    url = f"{BASE_URL}/lights/{idx}"
+                    req = urllib.request.Request(url, method="GET")
+                    with urllib.request.urlopen(req) as response:
+                        result = response.read().decode("utf-8")
+                        light_data = json.loads(result)
+                        
+                        # Check if the light exists and is on
+                        if "state" in light_data and "on" in light_data["state"]:
+                            total_lights += 1
+                            if light_data["state"]["on"]:
+                                lights_on += 1
+                            logger.debug(f"[{self.agent_id}] Light {idx}: {'on' if light_data['state']['on'] else 'off'}")
+                        else:
+                            logger.debug(f"[{self.agent_id}] Light {idx}: not found or invalid response")
+                            
+                except Exception as e:
+                    logger.debug(f"[{self.agent_id}] Failed to check light {idx}: {e}")
+                    continue
+            
+            # Determine overall state based on majority of lights
+            if total_lights == 0:
+                logger.warning(f"[{self.agent_id}] No lights found, defaulting to 'off'")
+                return "off"
+            
+            # If more than half the lights are on, consider the system "on"
+            if lights_on > total_lights / 2:
+                logger.info(f"[{self.agent_id}] Light state check: {lights_on}/{total_lights} lights on -> 'on'")
+                return "on"
+            else:
+                logger.info(f"[{self.agent_id}] Light state check: {lights_on}/{total_lights} lights on -> 'off'")
+                return "off"
+                
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error checking current light state: {e}")
+            # Default to "off" if we can't determine the state
+            logger.warning(f"[{self.agent_id}] Failed to check light state, defaulting to 'off'")
+            return "off"
 
     def __turn_on_light(self):
         # Replace with your bridge IP and API username
@@ -398,30 +492,123 @@ class LightHueAgent(VirtualAgent):
                 }
         return ret
 
+    def __verify_action_result(self, expected_state: str, max_retries: int = 2, retry_delay: float = 0.2) -> tuple:
+        """
+        Verify that the light state matches the expected state after an action.
+        
+        Args:
+            expected_state: Expected power state ("on" or "off")
+            max_retries: Maximum number of verification attempts (reduced for faster response)
+            retry_delay: Delay between verification attempts in seconds (reduced to 0.2s for faster response)
+            
+        Returns:
+            Tuple of (success: bool, actual_state: str, message: str)
+        """
+        for attempt in range(max_retries):
+            try:
+                time.sleep(retry_delay)  # Allow time for lights to respond
+                actual_state = self.__check_current_light_state()
+                
+                logger.debug(f"[{self.agent_id}] Verification attempt {attempt + 1}/{max_retries}: expected='{expected_state}', actual='{actual_state}'")
+                
+                if actual_state == expected_state:
+                    return True, actual_state, f"Verification successful after {attempt + 1} attempt(s)"
+                
+                if attempt < max_retries - 1:
+                    logger.debug(f"[{self.agent_id}] Verification attempt {attempt + 1} failed, retrying...")
+                    
+            except Exception as e:
+                logger.warning(f"[{self.agent_id}] Verification attempt {attempt + 1} failed with error: {e}")
+                if attempt < max_retries - 1:
+                    logger.debug(f"[{self.agent_id}] Retrying verification...")
+                    
+        return False, actual_state, f"Verification failed after {max_retries} attempts: expected '{expected_state}', got '{actual_state}'"
+
     def execute_action(self, action_payload: ActionPayload) -> dict:
-        """Execute light control actions - always obey context manager commands immediately."""
+        """Execute light control actions and verify actual state before reporting back."""
         logger.info(f"[{self.agent_id}] Executing action: {action_payload.actionName}")
+        
+        # Check if verification should be skipped for faster response
+        # For manual commands or when explicitly disabled
+        skip_verification = action_payload.parameters and action_payload.parameters.get("skip_verification", False)
         
         try:            
             if action_payload.actionName == "turn_on":
-                with self.state_lock:
-                    self.local_state["power"] = "on"
-                    new_state = self.local_state.copy()
-                    result = self.__turn_on_light()
+                # Execute the physical action first
+                result = self.__turn_on_light()
                 
-                logger.info(f"[{self.agent_id}] Light turned ON (commanded by context manager)")
-                # Trigger state publication since local_state changed
+                if skip_verification:
+                    # Skip verification for faster response
+                    logger.info(f"[{self.agent_id}] Turn ON command executed (verification skipped for speed)")
+                    with self.state_lock:
+                        self.local_state["power"] = "on"
+                        result["new_state"]["power"] = "on"
+                        result["message"] = "Turn ON: executed (verification skipped)"
+                else:
+                    # Verify actual light state with retry logic
+                    verification_success, actual_state, verification_message = self.__verify_action_result("on")
+                    
+                    logger.info(f"[{self.agent_id}] Turn ON command executed, {verification_message}")
+                    
+                    # Update local state based on verified actual state
+                    with self.state_lock:
+                        old_power_state = self.local_state.get("power")
+                        self.local_state["power"] = actual_state
+                        
+                        # Update result with verified state
+                        result["new_state"]["power"] = actual_state
+                        result["success"] = verification_success
+                        result["message"] = f"Turn ON: {verification_message}"
+                        
+                        if verification_success:
+                            logger.info(f"[{self.agent_id}] Light turned ON successfully (verified)")
+                        else:
+                            logger.warning(f"[{self.agent_id}] Light turn ON verification failed: {verification_message}")
+                
+                # Always trigger state publication with verified state
                 self._trigger_state_publication()
                 
             elif action_payload.actionName == "turn_off":
-                with self.state_lock:
-                    self.local_state["power"] = "off"
-                    new_state = self.local_state.copy()
-                    result = self.__turn_off_light()
+                # Execute the physical action first
+                result = self.__turn_off_light()
                 
-                logger.info(f"[{self.agent_id}] Light turned OFF (commanded by context manager)")
-                # Trigger state publication since local_state changed
+                if skip_verification:
+                    # Skip verification for faster response
+                    logger.info(f"[{self.agent_id}] Turn OFF command executed (verification skipped for speed)")
+                    with self.state_lock:
+                        self.local_state["power"] = "off"
+                        result["new_state"]["power"] = "off"
+                        result["message"] = "Turn OFF: executed (verification skipped)"
+                else:
+                    # Verify actual light state with retry logic
+                    verification_success, actual_state, verification_message = self.__verify_action_result("off")
+                    
+                    logger.info(f"[{self.agent_id}] Turn OFF command executed, {verification_message}")
+                    
+                    # Update local state based on verified actual state
+                    with self.state_lock:
+                        old_power_state = self.local_state.get("power")
+                        self.local_state["power"] = actual_state
+                        
+                        # Update result with verified state
+                        result["new_state"]["power"] = actual_state
+                        result["success"] = verification_success
+                        result["message"] = f"Turn OFF: {verification_message}"
+                        
+                        if verification_success:
+                            logger.info(f"[{self.agent_id}] Light turned OFF successfully (verified)")
+                        else:
+                            logger.warning(f"[{self.agent_id}] Light turn OFF verification failed: {verification_message}")
+                
+                # Always trigger state publication with verified state
                 self._trigger_state_publication()
+                
+            else:
+                result = {
+                    "success": False,
+                    "message": f"Unknown action: {action_payload.actionName}",
+                    "new_state": {}
+                }
                     
             return result
             
@@ -431,3 +618,39 @@ class LightHueAgent(VirtualAgent):
                 "success": False,
                 "message": f"Error executing action: {str(e)}"
             }
+
+    def _trigger_initial_state_publication(self):
+        """Trigger initial state publication to context manager after initialization."""
+        try:
+            # Small delay to ensure MQTT connection is ready
+            import time
+            time.sleep(0.5)
+            
+            # Trigger state publication with actual light state
+            self._trigger_state_publication()
+            logger.info(f"[{self.agent_id}] Initial state published to context manager: power={self.local_state.get('power')}")
+            
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error publishing initial state: {e}")
+
+    def refresh_light_state(self):
+        """Manually refresh the light state from the Hue bridge and update local state."""
+        try:
+            current_power_state = self.__check_current_light_state()
+            
+            with self.state_lock:
+                old_power_state = self.local_state.get("power")
+                self.local_state["power"] = current_power_state
+                
+                if old_power_state != current_power_state:
+                    logger.info(f"[{self.agent_id}] Light state refreshed: {old_power_state} → {current_power_state}")
+                    # Trigger state publication since state changed
+                    self._trigger_state_publication()
+                    return True  # State changed
+                else:
+                    logger.debug(f"[{self.agent_id}] Light state refresh: no change ({current_power_state})")
+                    return False  # No state change
+                    
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error refreshing light state: {e}")
+            return False

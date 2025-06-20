@@ -1,0 +1,77 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Hue light infrared + motion + light sensor OR logic rules ---
+# Turn ON light if (EITHER person is near OR motion is detected) AND light is dark
+# Turn OFF light if (BOTH person is far AND motion is no_motion) OR light is bright
+
+# Turn ON light when person is near AND light is dark
+lapras:HueLightOnWhenNearAndDarkRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsNearCondition ;
+    lapras:hasCondition lapras:IsDarkCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOnFromProximity .
+
+# Turn ON light when motion is detected AND light is dark
+lapras:HueLightOnWhenMotionAndDarkRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsMotionCondition ;
+    lapras:hasCondition lapras:IsDarkCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOnFromMotion .
+
+lapras:IsNearCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:IsMotionCondition
+    lapras:hasSensor "motion_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "motion" .
+
+lapras:IsDarkCondition
+    lapras:hasSensor "light_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "dark" .
+
+lapras:SetHueLightPowerOnFromProximity lapras:hasStateUpdate '{"power": "on"}' .
+lapras:SetHueLightPowerOnFromMotion lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn OFF light when BOTH person is far AND motion is no_motion
+lapras:HueLightOffWhenFarAndNoMotionRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsFarCondition ;
+    lapras:hasCondition lapras:IsNoMotionCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOff .
+
+# Turn OFF light when light becomes bright (daylight override)
+lapras:HueLightOffWhenBrightRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsLightOnCondition ;
+    lapras:hasCondition lapras:IsBrightCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOffFromBright .
+
+lapras:IsFarCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:IsNoMotionCondition
+    lapras:hasSensor "motion_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "no_motion" .
+
+lapras:IsLightOnCondition
+    lapras:hasSensor "power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+lapras:IsBrightCondition
+    lapras:hasSensor "light_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "bright" .
+
+lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' .
+lapras:SetHueLightPowerOffFromBright lapras:hasStateUpdate '{"power": "off"}' . 

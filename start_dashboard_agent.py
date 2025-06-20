@@ -71,6 +71,7 @@ def main():
                 "motion": ["motion_01", "motion_02", "motion_03", "motion_04", "motion_05", "motion_06", "motion_07", "motion_08", "motion_mf1","motion_mb1"],
                 "temperature": ["temperature_3"],
                 "door": ["door_01"],
+                "tilt": ["tilt_01", "tilt_02"],
                 "activity": ["activity_s1b", "activity_s2a", "activity_s3a", "activity_s4a","activity_s5a","activity_s6a","activity_s2b","activity_s3b","activity_s4b","activity_s5b","activity_s6b","activity_s7b"]
             }
         elif args.preset == 'infrared-only':
