@@ -2,6 +2,7 @@ import logging
 import time
 import sys
 import os
+import subprocess
 from collections import defaultdict
 
 # Add the project root to Python path
@@ -10,22 +11,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lapras_middleware.virtual_agent import VirtualAgent
 from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager, SensorPayload, ActionPayload, ActionReportPayload
 
-# Import the IR controller for actual AC control
-try:
-    from lapras_agents.utils.test_ir_controller import AirConditionerController
-except ImportError:
-    AirConditionerController = None
-    # Logger will be defined below - no need for duplicate declaration
-
 logger = logging.getLogger(__name__)
-
-# Log warning if IR controller is not available
-if AirConditionerController is None:
-    logger.warning("AirConditionerController not available - using mock implementation")
 
 class AirconAgent(VirtualAgent):
     def __init__(self, agent_id: str = "aircon", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, 
-                 sensor_config: dict = None, transmission_interval: float = 0.5, phidget_serial: int = -1):
+                 sensor_config: dict = None, transmission_interval: float = 0.5):
         
         # Initialize attributes that might be accessed by perception thread first
         self.transmission_interval = transmission_interval  # seconds between transmissions
@@ -45,10 +35,14 @@ class AirconAgent(VirtualAgent):
         self.sensor_config = sensor_config
         self.supported_sensor_types = ["infrared", "motion", "activity"]
         
-        # Initialize IR controller for actual AC control first
-        self.ir_controller = None
-        self.phidget_serial = phidget_serial
-        self._initialize_ir_controller()
+        # Define the two IR controller device serial numbers
+        self.ir_device_serials = [322207, 164793]
+        
+        # Path to the IR controller script
+        self.ir_script_path = "lapras_agents/utils/test_ir_controller.py"
+        
+        # Test IR controller availability
+        self._test_ir_controller()
         
         # Initialize local state with known state
         self.local_state.update({
@@ -71,17 +65,80 @@ class AirconAgent(VirtualAgent):
         # Publish initial state to context manager
         self._trigger_initial_state_publication()
     
-    def _initialize_ir_controller(self):
-        """Initialize the IR controller for AC control."""
+    def _test_ir_controller(self):
+        """Test if the IR controller script is available and working."""
         try:
-            if AirConditionerController:
-                self.ir_controller = AirConditionerController(self.phidget_serial)
-                logger.info(f"[{self.agent_id}] IR controller initialized with serial: {self.phidget_serial}")
+            # Test if the script exists and is executable
+            result = subprocess.run([
+                "python", self.ir_script_path, "--help"
+            ], capture_output=True, text=True, timeout=5)
+            
+            if result.returncode == 0:
+                logger.info(f"[{self.agent_id}] IR controller script available at {self.ir_script_path}")
+                logger.info(f"[{self.agent_id}] Will control devices: {self.ir_device_serials}")
             else:
-                logger.warning(f"[{self.agent_id}] IR controller not available - using mock mode")
+                logger.warning(f"[{self.agent_id}] IR controller script not working properly - using mock mode")
+                
         except Exception as e:
-            logger.error(f"[{self.agent_id}] Failed to initialize IR controller: {e}")
-            self.ir_controller = None
+            logger.warning(f"[{self.agent_id}] IR controller script not available: {e} - using mock mode")
+    
+    def _execute_ir_command(self, command: str) -> dict:
+        """Execute IR command on both devices using shell commands."""
+        results = {"success": True, "messages": [], "failures": []}
+        
+        for device_serial in self.ir_device_serials:
+            try:
+                cmd = ["python", self.ir_script_path, "--device", str(device_serial), command]
+                logger.debug(f"[{self.agent_id}] Executing: {' '.join(cmd)}")
+                
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,  # 10 second timeout
+                    cwd=os.getcwd()
+                )
+                
+                if result.returncode == 0:
+                    success_msg = f"Device {device_serial}: {command} command successful"
+                    results["messages"].append(success_msg)
+                    logger.info(f"[{self.agent_id}] {success_msg}")
+                else:
+                    error_msg = f"Device {device_serial}: {command} command failed - {result.stderr.strip()}"
+                    results["failures"].append(error_msg)
+                    results["success"] = False
+                    logger.error(f"[{self.agent_id}] {error_msg}")
+                    
+            except subprocess.TimeoutExpired:
+                error_msg = f"Device {device_serial}: {command} command timed out"
+                results["failures"].append(error_msg)
+                results["success"] = False
+                logger.error(f"[{self.agent_id}] {error_msg}")
+                
+            except Exception as e:
+                error_msg = f"Device {device_serial}: {command} command error - {str(e)}"
+                results["failures"].append(error_msg)
+                results["success"] = False
+                logger.error(f"[{self.agent_id}] {error_msg}")
+        
+        # Combine all messages
+        if results["success"]:
+            combined_message = f"Successfully executed '{command}' on all devices: " + "; ".join(results["messages"])
+        else:
+            success_count = len(results["messages"])
+            total_count = len(self.ir_device_serials)
+            combined_message = f"'{command}' completed with {success_count}/{total_count} devices successful"
+            if results["failures"]:
+                combined_message += f". Failures: {'; '.join(results['failures'])}"
+        
+        return {
+            "success": results["success"],
+            "message": combined_message,
+            "individual_results": {
+                "successes": results["messages"],
+                "failures": results["failures"]
+            }
+        }
     
     def _configure_sensors(self):
         """Configure sensors based on the sensor_config."""
@@ -361,105 +418,77 @@ class AirconAgent(VirtualAgent):
             pass
 
     def __turn_on_aircon(self):
-        """Turn on the air conditioner using IR controller."""
+        """Turn on both air conditioners using IR controller commands."""
         try:
-            if self.ir_controller:
-                success = self.ir_controller.turn_on()
-                if success:
-                    return {
-                        "success": True,
-                        "message": f"Turned on aircon {self.agent_id} via IR controller",
-                        "new_state": {
-                            "power": "on"
-                        }
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "message": f"Failed to turn on aircon {self.agent_id} via IR controller"
-                    }
-            else:
-                # Mock mode - just return success
-                logger.info(f"[{self.agent_id}] Mock: Turning on aircon")
+            result = self._execute_ir_command("on")
+            
+            if result["success"]:
                 return {
                     "success": True,
-                    "message": f"Turned on aircon {self.agent_id} (mock mode)",
+                    "message": f"Turned on all aircons via IR controllers: {result['message']}",
                     "new_state": {
                         "power": "on"
                     }
                 }
+            else:
+                return {
+                    "success": False,
+                    "message": f"Failed to turn on some/all aircons: {result['message']}"
+                }
+                
         except Exception as e:
-            logger.error(f"[{self.agent_id}] Error turning on aircon: {e}")
+            logger.error(f"[{self.agent_id}] Error turning on aircons: {e}")
             return {
                 "success": False,
-                "message": f"Error turning on aircon: {str(e)}"
+                "message": f"Error turning on aircons: {str(e)}"
             }
     
     def __turn_off_aircon(self):
-        """Turn off the air conditioner using IR controller."""
+        """Turn off both air conditioners using IR controller commands."""
         try:
-            if self.ir_controller:
-                success = self.ir_controller.turn_off()
-                if success:
-                    return {
-                        "success": True,
-                        "message": f"Turned off aircon {self.agent_id} via IR controller",
-                        "new_state": {
-                            "power": "off"
-                        }
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "message": f"Failed to turn off aircon {self.agent_id} via IR controller"
-                    }
-            else:
-                # Mock mode - just return success
-                logger.info(f"[{self.agent_id}] Mock: Turning off aircon")
+            result = self._execute_ir_command("off")
+            
+            if result["success"]:
                 return {
                     "success": True,
-                    "message": f"Turned off aircon {self.agent_id} (mock mode)",
+                    "message": f"Turned off all aircons via IR controllers: {result['message']}",
                     "new_state": {
                         "power": "off"
                     }
                 }
+            else:
+                return {
+                    "success": False,
+                    "message": f"Failed to turn off some/all aircons: {result['message']}"
+                }
+                
         except Exception as e:
-            logger.error(f"[{self.agent_id}] Error turning off aircon: {e}")
+            logger.error(f"[{self.agent_id}] Error turning off aircons: {e}")
             return {
                 "success": False,
-                "message": f"Error turning off aircon: {str(e)}"
+                "message": f"Error turning off aircons: {str(e)}"
             }
     
     def __temp_up_aircon(self):
-        """Increase temperature using IR controller."""
+        """Increase temperature on both air conditioners using IR controller commands."""
         try:
-            if self.ir_controller:
-                success = self.ir_controller.temp_up()
-                new_temp = self.local_state.get("temperature", 25) + 1
-                if success:
-                    return {
-                        "success": True,
-                        "message": f"Increased temperature of aircon {self.agent_id} via IR controller",
-                        "new_state": {
-                            "temperature": new_temp
-                        }
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "message": f"Failed to increase temperature of aircon {self.agent_id} via IR controller"
-                    }
-            else:
-                # Mock mode - just return success
-                new_temp = self.local_state.get("temperature", 25) + 1
-                logger.info(f"[{self.agent_id}] Mock: Increasing temperature to {new_temp}")
+            result = self._execute_ir_command("temp_up")
+            new_temp = self.local_state.get("temperature", 25) + 1
+            
+            if result["success"]:
                 return {
                     "success": True,
-                    "message": f"Increased temperature of aircon {self.agent_id} to {new_temp}°C (mock mode)",
+                    "message": f"Increased temperature on all aircons via IR controllers: {result['message']}",
                     "new_state": {
                         "temperature": new_temp
                     }
                 }
+            else:
+                return {
+                    "success": False,
+                    "message": f"Failed to increase temperature on some/all aircons: {result['message']}"
+                }
+                
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error increasing temperature: {e}")
             return {
@@ -468,35 +497,25 @@ class AirconAgent(VirtualAgent):
             }
     
     def __temp_down_aircon(self):
-        """Decrease temperature using IR controller."""
+        """Decrease temperature on both air conditioners using IR controller commands."""
         try:
-            if self.ir_controller:
-                success = self.ir_controller.temp_down()
-                new_temp = self.local_state.get("temperature", 25) - 1
-                if success:
-                    return {
-                        "success": True,
-                        "message": f"Decreased temperature of aircon {self.agent_id} via IR controller",
-                        "new_state": {
-                            "temperature": new_temp
-                        }
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "message": f"Failed to decrease temperature of aircon {self.agent_id} via IR controller"
-                    }
-            else:
-                # Mock mode - just return success
-                new_temp = self.local_state.get("temperature", 25) - 1
-                logger.info(f"[{self.agent_id}] Mock: Decreasing temperature to {new_temp}")
+            result = self._execute_ir_command("temp_down")
+            new_temp = self.local_state.get("temperature", 25) - 1
+            
+            if result["success"]:
                 return {
                     "success": True,
-                    "message": f"Decreased temperature of aircon {self.agent_id} to {new_temp}°C (mock mode)",
+                    "message": f"Decreased temperature on all aircons via IR controllers: {result['message']}",
                     "new_state": {
                         "temperature": new_temp
                     }
                 }
+            else:
+                return {
+                    "success": False,
+                    "message": f"Failed to decrease temperature on some/all aircons: {result['message']}"
+                }
+                
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error decreasing temperature: {e}")
             return {
@@ -641,14 +660,8 @@ class AirconAgent(VirtualAgent):
             }
     
     def stop(self):
-        """Stop the aircon agent and clean up IR controller."""
-        if self.ir_controller:
-            try:
-                self.ir_controller.close()
-                logger.info(f"[{self.agent_id}] IR controller closed")
-            except Exception as e:
-                logger.error(f"[{self.agent_id}] Error closing IR controller: {e}")
-        
+        """Stop the aircon agent."""
+        logger.info(f"[{self.agent_id}] AirconAgent stopping")
         super().stop()
 
     def _trigger_initial_state_publication(self):
