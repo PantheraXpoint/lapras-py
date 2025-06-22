@@ -39,7 +39,7 @@ class MultiChannelSensorReader:
                 sensor.setIsHubPortDevice(False)  # VINT devices are not hub port devices
                 
                 # Try to open with timeout
-                sensor.openWaitForAttachment(3000)  # Increased timeout
+                sensor.openWaitForAttachment(1000)  # Reduced timeout for faster discovery
                 
                 if sensor.getAttached():
                     print(f"✓ Found Distance Sensor on Hub Port {hub_port}")
@@ -58,25 +58,12 @@ class MultiChannelSensorReader:
                     sensor.setDataInterval(DATA_INTERVAL_MS)
                     sensor.setDistanceChangeTrigger(0)  # Continuous readings
                     
-                    # Wait longer for sensor to fully initialize
-                    print(f"  Initializing sensor on port {hub_port}...")
-                    max_wait_attempts = 20  # Wait up to 10 seconds
-                    sensor_ready = False
-                    
-                    for attempt in range(max_wait_attempts):
-                        try:
-                            test_distance = sensor.getDistance()
-                            print(f"  Initial reading: {test_distance:.1f} mm")
-                            sensor_ready = True
-                            break
-                        except Exception as e:
-                            if attempt < max_wait_attempts - 1:  # Not the last attempt
-                                time.sleep(0.5)  # Wait 500ms between attempts
-                            else:
-                                print(f"  Warning: Sensor not ready after {max_wait_attempts * 0.5}s - {str(e)}")
-                    
-                    if not sensor_ready:
-                        print(f"  Sensor on port {hub_port} will be included but may need more time")
+                    # Quick sensor initialization check
+                    try:
+                        test_distance = sensor.getDistance()
+                        print(f"  Initial reading: {test_distance/10:.1f} cm")
+                    except:
+                        print(f"  Sensor on port {hub_port} will initialize during streaming")
                     
                     self.sensors[hub_port] = sensor
                     self.sensor_types[hub_port] = "DistanceSensor"
@@ -121,16 +108,18 @@ class MultiChannelSensorReader:
                         distance = sensor.getDistance()
                         readings.append(distance)
                         successful_readings += 1
-                        print(f"  Reading {i+1}: {distance:.1f} mm")
+                        print(f"  Reading {i+1}: {distance/10:.1f} cm")
                     except Exception as e:
                         error_count += 1
-                        print(f"  Reading {i+1}: ERROR - {str(e)}")
-                    time.sleep(0.1)
+                        if "0x33" not in str(e):
+                            print(f"  Reading {i+1}: ERROR - {str(e)}")
+                        else:
+                            print(f"  Reading {i+1}: Initializing...")
                 
                 print(f"  Success rate: {successful_readings}/10")
                 if readings:
                     avg_distance = sum(readings) / len(readings)
-                    print(f"  Average distance: {avg_distance:.1f} mm")
+                    print(f"  Average distance: {avg_distance/10:.1f} cm")
     
     def log_sensor_data(self, discovered_ports):
         """Continuously log data from all discovered sensors"""
@@ -154,16 +143,16 @@ class MultiChannelSensorReader:
                             
                             # Check if distance reading is valid
                             if distance_value < 0 or distance_value > 1300:
-                                distance_str = "OOR"  # Out of Range
+                                distance_str = "130cm"  # Max range when out of range
                             else:
-                                distance_str = f"{distance_value:.0f}mm"
+                                distance_str = f"{distance_value/10:.0f}cm"
                             
                             sensor_readings.append(f"P{hub_port}:{distance_str}")
                         except Exception as e:
                             # More detailed error reporting
                             error_msg = str(e)
                             if "0x33" in error_msg or "Unknown or Invalid Value" in error_msg:
-                                sensor_readings.append(f"P{hub_port}:INIT")
+                                sensor_readings.append(f"P{hub_port}:130cm")
                             elif "timeout" in error_msg.lower():
                                 sensor_readings.append(f"P{hub_port}:TIMEOUT")
                             elif "not attached" in error_msg.lower():
