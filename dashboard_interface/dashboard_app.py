@@ -86,6 +86,7 @@ def main():
     client = st.session_state.get('mqtt_client')
     designer = st.session_state.room_designer
     db = get_event_db()  # Initialize the event database connection
+    clicked_sensor = bridge("sensor-id-bridge", default="")
 
     # --- UI Layout: Main content area and right control column ---
     col1, col2 = st.columns([0.85, 0.15])
@@ -93,23 +94,55 @@ def main():
 
     with col2:
         st.subheader("Control")
-    col21, col22 = col2.columns([0.2, 0.8])
+    col21, light_btn = col2.columns([0.2, 0.8])
     light_icon = col21.empty()
-    light_btn = col22.empty()
-    with col21:
+    with col2:
         st.write("")
-    with col22:
-        st.write("")
-    ac_icon = col21.empty()
-    ac_btn = col22.empty()
+    col23, ac_btn = col2.columns([0.2, 0.8])
+    ac_icon = col23.empty()
 
-    clicked_sensor = bridge("sensor-id-bridge", default="")
+    with col2:
+        st.write("")
+        st.write("Service Adjustments:")
+        update_req = st.button("Update Rule", key="update_rules", use_container_width=True)
+    rule_adjust_text =  col2.empty()
+    rule_adjust_container = col2.empty()
+    if update_req:
+        rule_adjust_text.text = "Adjust temperature for AC automation (°C):"
+        temperature = rule_adjust_container.text_input("Temperature", key="temperature_adjustment", value="35.0", type="default")
+        if temperature:
+            try:
+                temperature = float(temperature)
+                if temperature < 0 or temperature > 50:
+                    st.error("Please enter a valid temperature between 0 and 50 °C.")
+                else:
+
+                    st.success(f"AC automation rule updated to {temperature} °C.")
+            except ValueError:
+                st.error("Invalid input. Please enter a numeric value for temperature.")
+
+    with col2:
+        st.write("")
+        add_req = st.button("Add Sensor", key="add_sensor", use_container_width=True)
+    rule_adjust_text =  col2.empty()
+    rule_adjust_container = col2.empty()
+    if add_req:
+        rule_adjust_text.text = "Which service to modify?"
+        service_id = rule_adjust_container.text_input("Service ID", key="sensor_id_addition", value="", type="default")
+        if service_id and sensor_id:
+
+            st.success(f"Sensor {sensor_id} added successfully to {service_id}.")
+
+    with col2:
+        st.write("")
+        st.button("Remove Sensor", key="remove_sensor", use_container_width=True)
+
     last_svg = ""
     if clicked_sensor:
         #st.write(f"Clicked sensor ID: {clicked_sensor}")
         # Querying the sensor data from database
         sensor_data = query_event_db(db, clicked_sensor)
-        if sensor_data and not df.empty:
+        if sensor_data:
             # Convert timestamp to datetime for plotting
             df = pd.DataFrame([
                 {
@@ -189,6 +222,4 @@ if __name__ == "__main__":
                     st.session_state.test_sensors[sensor_id] = {'value': 22.0, 'sensor_type': 'temperature'}
                 elif sensor_id.startswith('light'):
                     st.session_state.test_sensors[sensor_id] = {'value': 50, 'sensor_type': 'light'}
-
     main()
-
