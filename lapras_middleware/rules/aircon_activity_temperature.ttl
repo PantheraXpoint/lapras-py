@@ -1,0 +1,44 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Aircon activity + temperature sensor rules ---
+
+# Turn ON cooling when activity is detected AND temperature is hot
+lapras:AirconCoolOnWhenActiveAndHotRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsActiveCondition ;
+    lapras:hasCondition lapras:IsTemperatureHotCondition ;
+    lapras:hasAction lapras:SetAirconCoolOn .
+
+# Turn OFF aircon when no activity is detected (regardless of temperature)
+lapras:AirconOffWhenInactiveRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsInactiveCondition ;
+    lapras:hasAction lapras:SetAirconPowerOff .
+
+# Conditions
+lapras:IsActiveCondition
+    lapras:hasSensor "activity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "active" .
+
+lapras:IsInactiveCondition
+    lapras:hasSensor "activity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "inactive" .
+
+lapras:IsTemperatureHotCondition
+    lapras:hasSensor "temperature_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "hot" .
+
+lapras:IsTemperatureCoolCondition
+    lapras:hasSensor "temperature_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "cool" .
+
+# Actions
+lapras:SetAirconCoolOn lapras:hasStateUpdate '{"power": "on", "mode": "cool"}' .
+lapras:SetAirconPowerOff lapras:hasStateUpdate '{"power": "off"}' . 

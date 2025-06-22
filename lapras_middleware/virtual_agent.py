@@ -323,8 +323,8 @@ class VirtualAgent(Agent, ABC):
         # Track if any metadata changed (generalizable for any sensor type)
         metadata_changed = False
         changed_metadata_fields = []
-        complete_state = None
-        sensor_data_copy = None
+        # complete_state = None
+        # sensor_data_copy = None
         
         # logger.info(f"[{self.agent_id}] DEBUG: About to acquire state_lock")
         with self.state_lock:
@@ -356,15 +356,20 @@ class VirtualAgent(Agent, ABC):
                     logger.info(f"[{self.agent_id}] Sensor {sensor_id} metadata changed: {', '.join(changed_metadata_fields)}")
             
             # Prepare data for publishing while we have the lock
-            complete_state = self.local_state.copy()
-            sensor_data_copy = self.sensor_data.copy()
+            # complete_state = self.local_state.copy()
+            # sensor_data_copy = self.sensor_data.copy()
         
         logger.info(f"[{self.agent_id}] DEBUG: state_lock released")
-        
-        # Always trigger perception update for subclass processing
+
+        # Always trigger perception update for subclass processing BEFORE copying data for publishing
         logger.info(f"[{self.agent_id}] DEBUG: About to call _process_sensor_update")
         self._process_sensor_update(sensor_payload, sensor_id)
         logger.info(f"[{self.agent_id}] DEBUG: _process_sensor_update completed")
+
+        # Now copy the data AFTER subclass processing is complete
+        with self.state_lock:
+            complete_state = self.local_state.copy()
+            sensor_data_copy = self.sensor_data.copy()
         
         # Always publish updateContext for sensor data (frequent updates are good for monitoring)
         logger.info(f"[{self.agent_id}] DEBUG: About to call _publish_context_update")

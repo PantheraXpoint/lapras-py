@@ -2,30 +2,21 @@ import logging
 import time
 import sys
 import os
+import subprocess
 from collections import defaultdict
 
 # Add the project root to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from lapras_middleware.virtual_agent import VirtualAgent
-from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager, SensorPayload, ActionPayload, ActionReportPayload
-
-# Import the IR controller for actual AC control
-try:
-    from lapras_agents.utils.test_ir_controller import AirConditionerController
-except ImportError:
-    AirConditionerController = None
-    # Logger will be defined below - no need for duplicate declaration
+from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager, SensorPayload, ActionPayload, ActionReportPayload, ThresholdConfigPayload
 
 logger = logging.getLogger(__name__)
 
-# Log warning if IR controller is not available
-if AirConditionerController is None:
-    logger.warning("AirConditionerController not available - using mock implementation")
-
 class AirconAgent(VirtualAgent):
     def __init__(self, agent_id: str = "aircon", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, 
-                 sensor_config: dict = None, transmission_interval: float = 0.5, phidget_serial: int = -1):
+                 sensor_config: dict = None, transmission_interval: float = 0.5,
+                 temp_threshold: float = 24.0):
         
         # Initialize attributes that might be accessed by perception thread first
         self.transmission_interval = transmission_interval  # seconds between transmissions
@@ -40,15 +31,26 @@ class AirconAgent(VirtualAgent):
         if sensor_config is None:
             sensor_config = {
                 "infrared": ["infrared_1"],  # Default to infrared sensor
+                "temperature": ["temperature_1"]  # Add temperature sensor support
             }
         
         self.sensor_config = sensor_config
-        self.supported_sensor_types = ["infrared", "motion", "activity"]
+        self.supported_sensor_types = ["infrared", "distance", "motion", "activity", "temperature"]
         
-        # Initialize IR controller for actual AC control first
-        self.ir_controller = None
-        self.phidget_serial = phidget_serial
-        self._initialize_ir_controller()
+        # Temperature threshold configuration for hot/cool classification - DYNAMIC (simplified)
+        self.temperature_threshold_config = {
+            "threshold": temp_threshold,  # Above this = hot, below = cool
+            "last_update": time.time()
+        }
+        
+        # Define the two IR controller device serial numbers
+        self.ir_device_serials = [322207, 164793]
+        
+        # Path to the IR controller script
+        self.ir_script_path = "lapras_agents/utils/test_ir_controller.py"
+        
+        # Test IR controller availability
+        self._test_ir_controller()
         
         # Initialize local state with known state
         self.local_state.update({
@@ -59,6 +61,8 @@ class AirconAgent(VirtualAgent):
             "motion_status": "unknown", 
             "activity_status": "unknown",
             "activity_detected": False,
+            "temperature_status": "unknown",  # hot, cool (simplified)
+            "temp_threshold": self.temperature_threshold_config["threshold"],  # Expose current threshold
         })
         
         self.sensor_data = defaultdict(dict)  # Store sensor data with sensor_id as key
@@ -66,22 +70,85 @@ class AirconAgent(VirtualAgent):
         # Dynamically add sensors based on configuration
         self._configure_sensors()
         
-        logger.info(f"[{self.agent_id}] AirconAgent initialization completed with sensors: {sensor_config} and transmission interval: {transmission_interval}s")
+        logger.info(f"[{self.agent_id}] AirconAgent initialization completed with sensors: {sensor_config} and transmission interval: {transmission_interval}s, temp threshold: {temp_threshold}°C")
 
         # Publish initial state to context manager
         self._trigger_initial_state_publication()
     
-    def _initialize_ir_controller(self):
-        """Initialize the IR controller for AC control."""
+    def _test_ir_controller(self):
+        """Test if the IR controller script is available and working."""
         try:
-            if AirConditionerController:
-                self.ir_controller = AirConditionerController(self.phidget_serial)
-                logger.info(f"[{self.agent_id}] IR controller initialized with serial: {self.phidget_serial}")
+            # Test if the script exists and is executable
+            result = subprocess.run([
+                "python", self.ir_script_path, "--help"
+            ], capture_output=True, text=True, timeout=5)
+            
+            if result.returncode == 0:
+                logger.info(f"[{self.agent_id}] IR controller script available at {self.ir_script_path}")
+                logger.info(f"[{self.agent_id}] Will control devices: {self.ir_device_serials}")
             else:
-                logger.warning(f"[{self.agent_id}] IR controller not available - using mock mode")
+                logger.warning(f"[{self.agent_id}] IR controller script not working properly - using mock mode")
+                
         except Exception as e:
-            logger.error(f"[{self.agent_id}] Failed to initialize IR controller: {e}")
-            self.ir_controller = None
+            logger.warning(f"[{self.agent_id}] IR controller script not available: {e} - using mock mode")
+    
+    def _execute_ir_command(self, command: str) -> dict:
+        """Execute IR command on both devices using shell commands."""
+        results = {"success": True, "messages": [], "failures": []}
+        
+        for device_serial in self.ir_device_serials:
+            try:
+                cmd = ["python", self.ir_script_path, "--device", str(device_serial), command]
+                logger.debug(f"[{self.agent_id}] Executing: {' '.join(cmd)}")
+                
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,  # 10 second timeout
+                    cwd=os.getcwd()
+                )
+                
+                if result.returncode == 0:
+                    success_msg = f"Device {device_serial}: {command} command successful"
+                    results["messages"].append(success_msg)
+                    logger.info(f"[{self.agent_id}] {success_msg}")
+                else:
+                    error_msg = f"Device {device_serial}: {command} command failed - {result.stderr.strip()}"
+                    results["failures"].append(error_msg)
+                    results["success"] = False
+                    logger.error(f"[{self.agent_id}] {error_msg}")
+                    
+            except subprocess.TimeoutExpired:
+                error_msg = f"Device {device_serial}: {command} command timed out"
+                results["failures"].append(error_msg)
+                results["success"] = False
+                logger.error(f"[{self.agent_id}] {error_msg}")
+                
+            except Exception as e:
+                error_msg = f"Device {device_serial}: {command} command error - {str(e)}"
+                results["failures"].append(error_msg)
+                results["success"] = False
+                logger.error(f"[{self.agent_id}] {error_msg}")
+        
+        # Combine all messages
+        if results["success"]:
+            combined_message = f"Successfully executed '{command}' on all devices: " + "; ".join(results["messages"])
+        else:
+            success_count = len(results["messages"])
+            total_count = len(self.ir_device_serials)
+            combined_message = f"'{command}' completed with {success_count}/{total_count} devices successful"
+            if results["failures"]:
+                combined_message += f". Failures: {'; '.join(results['failures'])}"
+        
+        return {
+            "success": results["success"],
+            "message": combined_message,
+            "individual_results": {
+                "successes": results["messages"],
+                "failures": results["failures"]
+            }
+        }
     
     def _configure_sensors(self):
         """Configure sensors based on the sensor_config."""
@@ -136,10 +203,14 @@ class AirconAgent(VirtualAgent):
         # Process every sensor update immediately - let context manager handle timing decisions
         if sensor_payload.sensor_type == "infrared":
             self._process_infrared_sensor(sensor_payload, sensor_id, current_time)
+        elif sensor_payload.sensor_type == "distance":
+            self._process_distance_sensor(sensor_payload, sensor_id, current_time)
         elif sensor_payload.sensor_type == "motion":
             self._process_motion_sensor(sensor_payload, sensor_id, current_time)
         elif sensor_payload.sensor_type == "activity":
             self._process_activity_sensor(sensor_payload, sensor_id, current_time)
+        elif sensor_payload.sensor_type == "temperature":
+            self._process_temperature_sensor(sensor_payload, sensor_id, current_time)
         else:
             logger.warning(f"[{self.agent_id}] Unsupported sensor type: {sensor_payload.sensor_type}")
     
@@ -158,11 +229,44 @@ class AirconAgent(VirtualAgent):
                 logger.warning(f"[{self.agent_id}] No proximity_status in infrared sensor metadata")
                 return
                 
-            # Update global proximity status
+            # Update global proximity status (consider both infrared and distance sensors)
             proximity_detected = any(
                 sensor_info.get("metadata", {}).get("proximity_status") == "near"
                 for sensor_info in self.sensor_data.values()
-                if sensor_info.get("sensor_type") == "infrared"
+                if sensor_info.get("sensor_type") in ["infrared", "distance"]
+            )
+            new_proximity_status = "near" if proximity_detected else "far"
+            
+            if self.local_state.get("proximity_status") != new_proximity_status:
+                self.local_state["proximity_status"] = new_proximity_status
+                logger.info(f"[{self.agent_id}] Updated proximity_status to: {new_proximity_status}")
+
+            # Update activity_detected field for rules
+            self._update_activity_detected()
+
+            # Rate-limited state publication to context manager
+            self._schedule_transmission()
+    
+    def _process_distance_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
+        """Process distance sensor updates (same as infrared - uses proximity_status)."""
+        with self.state_lock:
+            # Update sensor data
+            self.sensor_data[sensor_id] = {
+                "sensor_type": sensor_payload.sensor_type,
+                "value": sensor_payload.value,
+                "unit": sensor_payload.unit,
+                "metadata": sensor_payload.metadata,
+            }
+
+            if not sensor_payload.metadata or "proximity_status" not in sensor_payload.metadata:
+                logger.warning(f"[{self.agent_id}] No proximity_status in distance sensor metadata")
+                return
+                
+            # Update global proximity status (distance sensors work same as infrared)
+            proximity_detected = any(
+                sensor_info.get("metadata", {}).get("proximity_status") == "near"
+                for sensor_info in self.sensor_data.values()
+                if sensor_info.get("sensor_type") in ["infrared", "distance"]  # Both sensor types
             )
             new_proximity_status = "near" if proximity_detected else "far"
             
@@ -238,6 +342,29 @@ class AirconAgent(VirtualAgent):
 
             # Update activity_detected field for rules
             self._update_activity_detected()
+
+            # Rate-limited state publication to context manager
+            self._schedule_transmission()
+    
+    def _process_temperature_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
+        """Process temperature sensor updates and classify as hot/cool."""
+        with self.state_lock:
+            # Update sensor data
+            self.sensor_data[sensor_id] = {
+                "sensor_type": sensor_payload.sensor_type,
+                "value": sensor_payload.value,
+                "unit": sensor_payload.unit,
+                "metadata": sensor_payload.metadata,
+            }
+
+            # Classify temperature using dynamic thresholds
+            try:
+                temp_value = float(sensor_payload.value)
+                self._classify_temperature_status(temp_value)
+                
+            except (ValueError, TypeError) as e:
+                logger.warning(f"[{self.agent_id}] Could not convert temperature sensor value to float: {sensor_payload.value}, error: {e}")
+                return
 
             # Rate-limited state publication to context manager
             self._schedule_transmission()
@@ -361,105 +488,77 @@ class AirconAgent(VirtualAgent):
             pass
 
     def __turn_on_aircon(self):
-        """Turn on the air conditioner using IR controller."""
+        """Turn on both air conditioners using IR controller commands."""
         try:
-            if self.ir_controller:
-                success = self.ir_controller.turn_on()
-                if success:
-                    return {
-                        "success": True,
-                        "message": f"Turned on aircon {self.agent_id} via IR controller",
-                        "new_state": {
-                            "power": "on"
-                        }
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "message": f"Failed to turn on aircon {self.agent_id} via IR controller"
-                    }
-            else:
-                # Mock mode - just return success
-                logger.info(f"[{self.agent_id}] Mock: Turning on aircon")
+            result = self._execute_ir_command("on")
+            
+            if result["success"]:
                 return {
                     "success": True,
-                    "message": f"Turned on aircon {self.agent_id} (mock mode)",
+                    "message": f"Turned on all aircons via IR controllers: {result['message']}",
                     "new_state": {
                         "power": "on"
                     }
                 }
+            else:
+                return {
+                    "success": False,
+                    "message": f"Failed to turn on some/all aircons: {result['message']}"
+                }
+                
         except Exception as e:
-            logger.error(f"[{self.agent_id}] Error turning on aircon: {e}")
+            logger.error(f"[{self.agent_id}] Error turning on aircons: {e}")
             return {
                 "success": False,
-                "message": f"Error turning on aircon: {str(e)}"
+                "message": f"Error turning on aircons: {str(e)}"
             }
     
     def __turn_off_aircon(self):
-        """Turn off the air conditioner using IR controller."""
+        """Turn off both air conditioners using IR controller commands."""
         try:
-            if self.ir_controller:
-                success = self.ir_controller.turn_off()
-                if success:
-                    return {
-                        "success": True,
-                        "message": f"Turned off aircon {self.agent_id} via IR controller",
-                        "new_state": {
-                            "power": "off"
-                        }
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "message": f"Failed to turn off aircon {self.agent_id} via IR controller"
-                    }
-            else:
-                # Mock mode - just return success
-                logger.info(f"[{self.agent_id}] Mock: Turning off aircon")
+            result = self._execute_ir_command("off")
+            
+            if result["success"]:
                 return {
                     "success": True,
-                    "message": f"Turned off aircon {self.agent_id} (mock mode)",
+                    "message": f"Turned off all aircons via IR controllers: {result['message']}",
                     "new_state": {
                         "power": "off"
                     }
                 }
+            else:
+                return {
+                    "success": False,
+                    "message": f"Failed to turn off some/all aircons: {result['message']}"
+                }
+                
         except Exception as e:
-            logger.error(f"[{self.agent_id}] Error turning off aircon: {e}")
+            logger.error(f"[{self.agent_id}] Error turning off aircons: {e}")
             return {
                 "success": False,
-                "message": f"Error turning off aircon: {str(e)}"
+                "message": f"Error turning off aircons: {str(e)}"
             }
     
     def __temp_up_aircon(self):
-        """Increase temperature using IR controller."""
+        """Increase temperature on both air conditioners using IR controller commands."""
         try:
-            if self.ir_controller:
-                success = self.ir_controller.temp_up()
-                new_temp = self.local_state.get("temperature", 25) + 1
-                if success:
-                    return {
-                        "success": True,
-                        "message": f"Increased temperature of aircon {self.agent_id} via IR controller",
-                        "new_state": {
-                            "temperature": new_temp
-                        }
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "message": f"Failed to increase temperature of aircon {self.agent_id} via IR controller"
-                    }
-            else:
-                # Mock mode - just return success
-                new_temp = self.local_state.get("temperature", 25) + 1
-                logger.info(f"[{self.agent_id}] Mock: Increasing temperature to {new_temp}")
+            result = self._execute_ir_command("temp_up")
+            new_temp = self.local_state.get("temperature", 25) + 1
+            
+            if result["success"]:
                 return {
                     "success": True,
-                    "message": f"Increased temperature of aircon {self.agent_id} to {new_temp}°C (mock mode)",
+                    "message": f"Increased temperature on all aircons via IR controllers: {result['message']}",
                     "new_state": {
                         "temperature": new_temp
                     }
                 }
+            else:
+                return {
+                    "success": False,
+                    "message": f"Failed to increase temperature on some/all aircons: {result['message']}"
+                }
+                
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error increasing temperature: {e}")
             return {
@@ -468,35 +567,25 @@ class AirconAgent(VirtualAgent):
             }
     
     def __temp_down_aircon(self):
-        """Decrease temperature using IR controller."""
+        """Decrease temperature on both air conditioners using IR controller commands."""
         try:
-            if self.ir_controller:
-                success = self.ir_controller.temp_down()
-                new_temp = self.local_state.get("temperature", 25) - 1
-                if success:
-                    return {
-                        "success": True,
-                        "message": f"Decreased temperature of aircon {self.agent_id} via IR controller",
-                        "new_state": {
-                            "temperature": new_temp
-                        }
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "message": f"Failed to decrease temperature of aircon {self.agent_id} via IR controller"
-                    }
-            else:
-                # Mock mode - just return success
-                new_temp = self.local_state.get("temperature", 25) - 1
-                logger.info(f"[{self.agent_id}] Mock: Decreasing temperature to {new_temp}")
+            result = self._execute_ir_command("temp_down")
+            new_temp = self.local_state.get("temperature", 25) - 1
+            
+            if result["success"]:
                 return {
                     "success": True,
-                    "message": f"Decreased temperature of aircon {self.agent_id} to {new_temp}°C (mock mode)",
+                    "message": f"Decreased temperature on all aircons via IR controllers: {result['message']}",
                     "new_state": {
                         "temperature": new_temp
                     }
                 }
+            else:
+                return {
+                    "success": False,
+                    "message": f"Failed to decrease temperature on some/all aircons: {result['message']}"
+                }
+                
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error decreasing temperature: {e}")
             return {
@@ -641,14 +730,8 @@ class AirconAgent(VirtualAgent):
             }
     
     def stop(self):
-        """Stop the aircon agent and clean up IR controller."""
-        if self.ir_controller:
-            try:
-                self.ir_controller.close()
-                logger.info(f"[{self.agent_id}] IR controller closed")
-            except Exception as e:
-                logger.error(f"[{self.agent_id}] Error closing IR controller: {e}")
-        
+        """Stop the aircon agent."""
+        logger.info(f"[{self.agent_id}] AirconAgent stopping")
         super().stop()
 
     def _trigger_initial_state_publication(self):
@@ -687,3 +770,159 @@ class AirconAgent(VirtualAgent):
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error refreshing aircon state: {e}")
             return False
+
+    def _setup_threshold_subscription(self):
+        """Setup subscription for threshold configuration commands."""
+        try:
+            threshold_topic = TopicManager.threshold_config_command(self.agent_id)
+            self.mqtt_client.subscribe(threshold_topic, qos=1)
+            logger.info(f"[{self.agent_id}] Subscribed to threshold config topic: {threshold_topic}")
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Failed to subscribe to threshold config topic: {e}")
+
+    def _handle_threshold_config_message(self, client, userdata, msg):
+        """Handle threshold configuration messages."""
+        try:
+            message_str = msg.payload.decode('utf-8')
+            event = MQTTMessage.deserialize(message_str)
+            
+            if event.event.type == "thresholdConfig":
+                threshold_payload = MQTTMessage.get_payload_as(event, ThresholdConfigPayload)
+                self._process_threshold_config(threshold_payload, event.event.id)
+                
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error handling threshold config message: {e}")
+
+    def _process_threshold_config(self, threshold_payload: ThresholdConfigPayload, command_id: str):
+        """Process temperature threshold configuration update (simplified to single threshold)."""
+        try:
+            if threshold_payload.threshold_type != "temperature":
+                result_event = EventFactory.create_threshold_config_result_event(
+                    agent_id=self.agent_id,
+                    command_id=command_id,
+                    success=False,
+                    message=f"Unsupported threshold type: {threshold_payload.threshold_type}",
+                    threshold_type=threshold_payload.threshold_type,
+                    current_config=self.temperature_threshold_config.copy()
+                )
+                self._publish_threshold_config_result(result_event)
+                return
+
+            config = threshold_payload.config
+            success = False
+            message = ""
+            
+            with self.state_lock:
+                old_threshold = self.temperature_threshold_config["threshold"]
+                
+                # Update threshold configuration (simplified to single threshold)
+                if "threshold" in config:
+                    new_threshold = float(config["threshold"])
+                    
+                    if 0 <= new_threshold <= 50:  # Reasonable temp range
+                        self.temperature_threshold_config["threshold"] = new_threshold
+                        self.temperature_threshold_config["last_update"] = time.time()
+                        
+                        # Update local state to reflect new threshold
+                        self.local_state["temp_threshold"] = new_threshold
+                        
+                        success = True
+                        message = f"Temperature threshold updated from {old_threshold}°C to {new_threshold}°C"
+                        logger.info(f"[{self.agent_id}] {message}")
+                        
+                        # Re-evaluate current temperature status with new threshold
+                        self._reevaluate_temperature_status()
+                        
+                    else:
+                        message = f"Invalid threshold value: {new_threshold}. Must be between 0-50°C"
+                else:
+                    message = "No threshold value provided in configuration"
+
+            # Send result back
+            result_event = EventFactory.create_threshold_config_result_event(
+                agent_id=self.agent_id,
+                command_id=command_id,
+                success=success,
+                message=message,
+                threshold_type="temperature",
+                current_config=self.temperature_threshold_config.copy()
+            )
+            self._publish_threshold_config_result(result_event)
+            
+            if success:
+                # Trigger state publication to update context manager
+                self._trigger_state_publication()
+                
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Error processing threshold config: {e}")
+            result_event = EventFactory.create_threshold_config_result_event(
+                agent_id=self.agent_id,
+                command_id=command_id,
+                success=False,
+                message=f"Error processing threshold config: {str(e)}",
+                threshold_type="temperature",
+                current_config=self.temperature_threshold_config.copy()
+            )
+            self._publish_threshold_config_result(result_event)
+
+    def _publish_threshold_config_result(self, result_event):
+        """Publish threshold configuration result."""
+        try:
+            result_topic = TopicManager.threshold_config_result(self.agent_id)
+            message = MQTTMessage.serialize(result_event)
+            self.mqtt_client.publish(result_topic, message, qos=1)
+            logger.debug(f"[{self.agent_id}] Published threshold config result to {result_topic}")
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] Failed to publish threshold config result: {e}")
+
+    def _reevaluate_temperature_status(self):
+        """Re-evaluate temperature status with current sensor data using new threshold."""
+        # Find the most recent temperature sensor reading
+        latest_temp_data = None
+        for sensor_id, sensor_data in self.sensor_data.items():
+            if sensor_data.get("sensor_type") == "temperature":
+                if latest_temp_data is None:
+                    latest_temp_data = sensor_data
+                # Could add timestamp comparison here if needed
+        
+        if latest_temp_data:
+            try:
+                temp_value = float(latest_temp_data["value"])
+                self._classify_temperature_status(temp_value)
+                
+            except (ValueError, TypeError) as e:
+                logger.warning(f"[{self.agent_id}] Could not re-evaluate temperature status: {e}")
+
+    def _classify_temperature_status(self, temp_value: float):
+        """Classify temperature as hot/cool using simple threshold comparison."""
+        threshold = self.temperature_threshold_config["threshold"]
+        
+        # Simple threshold logic: above threshold = hot, below = cool
+        new_status = "hot" if temp_value >= threshold else "cool"
+        
+        if self.local_state.get("temperature_status") != new_status:
+            self.local_state["temperature_status"] = new_status
+            logger.info(f"[{self.agent_id}] Updated temperature_status to: {new_status} (temp: {temp_value}°C, threshold: {threshold}°C)")
+
+    def get_current_threshold_config(self) -> dict:
+        """Get current temperature threshold configuration."""
+        with self.state_lock:
+            return self.temperature_threshold_config.copy()
+
+    def _on_message(self, client, userdata, msg):
+        """Override to handle threshold config messages in addition to base functionality."""
+        # Check if this is a threshold config message
+        if msg.topic == TopicManager.threshold_config_command(self.agent_id):
+            self._handle_threshold_config_message(client, userdata, msg)
+        else:
+            # Call parent's message handler for other messages
+            super()._on_message(client, userdata, msg)
+
+    def _on_connect(self, client, userdata, flags, rc):
+        """Override to add threshold subscription when MQTT connection is ready."""
+        # Call parent's _on_connect first to set up regular subscriptions
+        super()._on_connect(client, userdata, flags, rc)
+        
+        # Add threshold subscription after MQTT is connected
+        if rc == 0:
+            self._setup_threshold_subscription()

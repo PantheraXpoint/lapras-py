@@ -5,7 +5,7 @@
 
 # --- Hue light activity + motion + light sensor OR logic rules ---
 # Turn ON light if (EITHER activity is detected OR motion is detected) AND light is dark
-# Turn OFF light if (BOTH activity is inactive AND motion is no_motion) OR light is bright
+# Turn OFF light if (BOTH activity is inactive AND motion is no_motion) regardless of brightness
 
 # Turn ON light when activity is detected AND light is dark
 lapras:HueLightOnWhenActiveAndDarkRule a lapras:Rule ;
@@ -46,12 +46,7 @@ lapras:HueLightOffWhenInactiveAndNoMotionRule a lapras:Rule ;
     lapras:hasCondition lapras:IsNoMotionCondition ;
     lapras:hasAction lapras:SetHueLightPowerOff .
 
-# Turn OFF light when light becomes bright (daylight override)
-lapras:HueLightOffWhenBrightRule a lapras:Rule ;
-    lapras:hasAgent "hue_light" ;
-    lapras:hasCondition lapras:IsLightOnCondition ;
-    lapras:hasCondition lapras:IsBrightCondition ;
-    lapras:hasAction lapras:SetHueLightPowerOffFromBright .
+
 
 lapras:IsInactiveCondition
     lapras:hasSensor "activity_status" ;
@@ -73,5 +68,4 @@ lapras:IsBrightCondition
     lapras:hasOperator lapras:equals ;
     lapras:hasValue "bright" .
 
-lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' .
-lapras:SetHueLightPowerOffFromBright lapras:hasStateUpdate '{"power": "off"}' . 
+lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' . 

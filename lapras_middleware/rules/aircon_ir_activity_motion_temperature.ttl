@@ -1,0 +1,84 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Aircon infrared + activity + motion + temperature sensor OR logic rules ---
+# Turn ON cooling/heating if ANY of: (person is near OR activity is detected OR motion is detected) AND temperature condition is met
+# Turn OFF aircon only if ALL of: person is far AND activity is inactive AND motion is no_motion (regardless of temperature)
+
+# Turn ON cooling when person is near AND temperature is hot
+lapras:AirconCoolOnWhenNearAndHotRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsNearCondition ;
+    lapras:hasCondition lapras:IsTemperatureHotCondition ;
+    lapras:hasAction lapras:SetAirconCoolOn .
+
+# Turn ON cooling when activity is detected AND temperature is hot
+lapras:AirconCoolOnWhenActiveAndHotRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsActiveCondition ;
+    lapras:hasCondition lapras:IsTemperatureHotCondition ;
+    lapras:hasAction lapras:SetAirconCoolOnFromActivity .
+
+# Turn ON cooling when motion is detected AND temperature is hot
+lapras:AirconCoolOnWhenMotionAndHotRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsMotionCondition ;
+    lapras:hasCondition lapras:IsTemperatureHotCondition ;
+    lapras:hasAction lapras:SetAirconCoolOnFromMotion .
+
+# Turn OFF aircon when ALL sensors show no activity: person is far AND activity is inactive AND motion is no_motion
+lapras:AirconOffWhenAllInactiveRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsFarCondition ;
+    lapras:hasCondition lapras:IsInactiveCondition ;
+    lapras:hasCondition lapras:IsNoMotionCondition ;
+    lapras:hasAction lapras:SetAirconPowerOff .
+
+# Conditions
+lapras:IsNearCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:IsFarCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:IsActiveCondition
+    lapras:hasSensor "activity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "active" .
+
+lapras:IsInactiveCondition
+    lapras:hasSensor "activity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "inactive" .
+
+lapras:IsMotionCondition
+    lapras:hasSensor "motion_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "motion" .
+
+lapras:IsNoMotionCondition
+    lapras:hasSensor "motion_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "no_motion" .
+
+lapras:IsTemperatureHotCondition
+    lapras:hasSensor "temperature_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "hot" .
+
+lapras:IsTemperatureCoolCondition
+    lapras:hasSensor "temperature_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "cool" .
+
+# Actions
+lapras:SetAirconCoolOn lapras:hasStateUpdate '{"power": "on", "mode": "cool"}' .
+lapras:SetAirconCoolOnFromActivity lapras:hasStateUpdate '{"power": "on", "mode": "cool"}' .
+lapras:SetAirconCoolOnFromMotion lapras:hasStateUpdate '{"power": "on", "mode": "cool"}' .
+lapras:SetAirconPowerOff lapras:hasStateUpdate '{"power": "off"}' . 

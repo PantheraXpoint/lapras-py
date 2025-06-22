@@ -65,6 +65,32 @@ class InteractiveManualControlDashboard:
             }
         }
     
+        # Threshold configuration presets
+        self.threshold_presets = {
+            "hue_light": {
+                "description": "Light Threshold Configuration",
+                "threshold_type": "light",
+                "presets": {
+                    "dim_room": {"threshold": 30.0, "description": "Dim room (30 lux)"},
+                    "normal_room": {"threshold": 50.0, "description": "Normal room (50 lux)"},
+                    "bright_room": {"threshold": 70.0, "description": "Bright room (70 lux)"},
+                    "sunlight": {"threshold": 100.0, "description": "Sunlight (100 lux)"},
+                    "custom": {"threshold": 0.0, "description": "Custom threshold"}
+                }
+            },
+            "aircon": {
+                "description": "Temperature Threshold Configuration",
+                "threshold_type": "temperature",
+                "presets": {
+                    "cool_preference": {"threshold": 22.0, "description": "Cool preference (22°C)"},
+                    "normal_comfort": {"threshold": 24.0, "description": "Normal comfort (24°C)"},
+                    "warm_preference": {"threshold": 26.0, "description": "Warm preference (26°C)"},
+                    "energy_saving": {"threshold": 28.0, "description": "Energy saving (28°C)"},
+                    "custom": {"threshold": 24.0, "description": "Custom threshold"}
+                }
+            }
+        }
+    
     def clear_screen(self):
         """Clear the terminal screen."""
         os.system('clear' if os.name == 'posix' else 'cls')
@@ -101,22 +127,23 @@ class InteractiveManualControlDashboard:
         self.print_header()
         print("1. 🎯 Send command to predefined agent")
         print("2. ⚙️  Send custom command")
-        print("3. 📋 List available agent presets")
-        print("4. ❓ Help - Show examples")
-        print("5. 🚪 Quit")
+        print("3. 🌡️ Configure agent thresholds")
+        print("4. 📋 List available agent presets")
+        print("5. ❓ Help - Show examples")
+        print("6. 🚪 Quit")
         print("=" * 50)
     
     def get_user_choice(self) -> str:
         """Get user's menu choice."""
         while True:
             try:
-                choice = input("\nEnter your choice (1-5): ").strip()
-                if choice in ['1', '2', '3', '4', '5']:
+                choice = input("\nEnter your choice (1-6): ").strip()
+                if choice in ['1', '2', '3', '4', '5', '6']:
                     return choice
                 else:
-                    print("❌ Invalid choice. Please enter a number between 1-5.")
+                    print("❌ Invalid choice. Please enter a number between 1-6.")
             except (EOFError, KeyboardInterrupt):
-                return '5'  # Quit on Ctrl+C or EOF
+                return '6'  # Quit on Ctrl+C or EOF
     
     def show_agent_presets(self):
         """Show available agent presets."""
@@ -300,6 +327,12 @@ class InteractiveManualControlDashboard:
         print("   • During override, automatic rules are suspended")
         print("   • This prevents conflicts between manual and automatic control")
         
+        print("\n🌡️ Threshold Configuration:")
+        print("   • Light thresholds control bright/dark classification")
+        print("   • Temperature thresholds control hot/normal/cold classification")  
+        print("   • Changes take effect immediately for rule evaluation")
+        print("   • Simple threshold logic: < threshold = dark, ≥ threshold = bright")
+        
         print("\n🏷️  Common Agent Types:")
         for agent_id, info in self.agent_presets.items():
             print(f"   • {agent_id:<15} - {info['description']}")
@@ -313,6 +346,18 @@ class InteractiveManualControlDashboard:
         print("     • turn_on, turn_off, toggle")
         print("     • cool, heat, fan")
         print("     • temp_up, temp_down")
+        
+        print("\n🌡️ Threshold Examples:")
+        print("   Light (Lux):")
+        print("     • Bright room: 30 lux threshold")
+        print("     • Normal room: 50 lux threshold")
+        print("     • Dark room: 100 lux threshold")
+        print("   ")
+        print("   Temperature (°C):")
+        print("     • Cool preference: 22°C")
+        print("     • Normal comfort: 24°C")
+        print("     • Warm preference: 26°C")
+        print("     • Energy saving: 28°C")
         
         print("\n⚙️  Custom Commands:")
         print("   You can also send custom commands to any agent")
@@ -363,6 +408,225 @@ class InteractiveManualControlDashboard:
         if confirm in ['', 'y', 'yes']:
             self.send_manual_command(agent_id, command)
     
+    def handle_threshold_configuration(self):
+        """Handle threshold configuration for agents."""
+        # Select agent for threshold configuration
+        agent_id = self.select_threshold_agent()
+        if not agent_id:
+            return
+        
+        # Select threshold preset or custom configuration
+        config = self.select_threshold_config(agent_id)
+        if not config:
+            return
+        
+        # Send threshold configuration
+        self.send_threshold_configuration(agent_id, config)
+
+    def select_threshold_agent(self) -> Optional[str]:
+        """Let user select an agent for threshold configuration."""
+        self.clear_screen()
+        print("🌡️ Select Agent for Threshold Configuration:")
+        print("-" * 40)
+        
+        threshold_agents = list(self.threshold_presets.keys())
+        for i, agent_id in enumerate(threshold_agents, 1):
+            description = self.threshold_presets[agent_id]['description']
+            print(f"{i}. {agent_id:<15} - {description}")
+        
+        while True:
+            try:
+                choice = input(f"\nSelect agent (1-{len(threshold_agents)}) or 'c' to cancel: ").strip()
+                
+                if choice.lower() == 'c':
+                    return None
+                
+                agent_choice = int(choice) - 1
+                if 0 <= agent_choice < len(threshold_agents):
+                    return threshold_agents[agent_choice]
+                else:
+                    print(f"❌ Invalid choice. Please enter 1-{len(threshold_agents)} or 'c'.")
+                    
+            except ValueError:
+                print("❌ Please enter a valid number or 'c' to cancel.")
+            except (EOFError, KeyboardInterrupt):
+                return None
+
+    def select_threshold_config(self, agent_id: str) -> Optional[dict]:
+        """Let user select threshold configuration for the specified agent."""
+        if agent_id not in self.threshold_presets:
+            return None
+        
+        self.clear_screen()
+        threshold_info = self.threshold_presets[agent_id]
+        presets = threshold_info['presets']
+        preset_list = list(presets.keys())
+        
+        print(f"🌡️ Threshold Configuration for {agent_id}:")
+        print("-" * 40)
+        
+        for i, preset_name in enumerate(preset_list, 1):
+            preset = presets[preset_name]
+            print(f"{i}. {preset['description']}")
+        
+        while True:
+            try:
+                choice = input(f"\nSelect preset (1-{len(preset_list)}) or 'c' to cancel: ").strip()
+                
+                if choice.lower() == 'c':
+                    return None
+                
+                preset_choice = int(choice) - 1
+                if 0 <= preset_choice < len(preset_list):
+                    preset_name = preset_list[preset_choice]
+                    selected_preset = presets[preset_name].copy()
+                    
+                    # Handle custom configuration
+                    if preset_name == "custom":
+                        return self.get_custom_threshold_config(agent_id, selected_preset)
+                    else:
+                        # Remove description from config
+                        selected_preset.pop('description', None)
+                        return {
+                            'threshold_type': threshold_info['threshold_type'],
+                            'config': selected_preset,
+                            'preset_name': preset_name
+                        }
+                else:
+                    print(f"❌ Invalid choice. Please enter 1-{len(preset_list)} or 'c'.")
+                    
+            except ValueError:
+                print("❌ Please enter a valid number or 'c' to cancel.")
+            except (EOFError, KeyboardInterrupt):
+                return None
+
+    def get_custom_threshold_config(self, agent_id: str, base_config: dict) -> Optional[dict]:
+        """Get custom threshold configuration from user input."""
+        try:
+            self.clear_screen()
+            print(f"⚙️ Custom Threshold Configuration for {agent_id}:")
+            print("-" * 45)
+            
+            threshold_info = self.threshold_presets[agent_id]
+            threshold_type = threshold_info['threshold_type']
+            config = {}
+            
+            if threshold_type == "light":
+                # Light threshold configuration (simplified - no hysteresis)
+                print("Configure light threshold (lux value):")
+                print("• Values below threshold = DARK")
+                print("• Values above threshold = BRIGHT")
+                print("• Typical range: 10-200 lux")
+                
+                threshold = float(input("Enter light threshold (lux): ").strip())
+                
+                if 0 <= threshold <= 1000:
+                    config = {"threshold": threshold}
+                else:
+                    print("❌ Invalid threshold. Must be between 0-1000 lux")
+                    return None
+                    
+            elif threshold_type == "temperature":
+                # Temperature threshold configuration
+                print("Configure temperature threshold (°C):")
+                print("• Below threshold = COOL")
+                print("• Above threshold = HOT")
+                print("• Typical range: 15-35°C")
+                
+                threshold = float(input("Enter temperature threshold (°C): ").strip())
+                
+                if 0 <= threshold <= 50:
+                    config = {"threshold": threshold}
+                else:
+                    print("❌ Invalid threshold. Must be between 0-50°C")
+                    return None
+            
+            return {
+                'threshold_type': threshold_type,
+                'config': config,
+                'preset_name': 'custom'
+            }
+            
+        except (ValueError, EOFError, KeyboardInterrupt):
+            print("❌ Invalid input or cancelled.")
+            return None
+
+    def send_threshold_configuration(self, agent_id: str, threshold_config: dict):
+        """Send threshold configuration and wait for results."""
+        if not self.subscriber:
+            if not self.initialize_subscriber():
+                return False
+        
+        self.clear_screen()
+        threshold_type = threshold_config['threshold_type']
+        config = threshold_config['config']
+        preset_name = threshold_config['preset_name']
+        
+        print(f"🌡️ Configuring {threshold_type} thresholds for {agent_id}")
+        print("=" * 50)
+        print(f"Preset: {preset_name}")
+        print(f"Configuration: {config}")
+        print()
+        
+        # Check connection status
+        if not hasattr(self.subscriber, 'mqtt_client') or not self.subscriber.mqtt_client.is_connected():
+            print("❌ MQTT connection lost. Trying to reconnect...")
+            if not self.initialize_subscriber():
+                input("\nPress Enter to continue...")
+                return False
+        
+        # Send the threshold configuration command
+        command_id = self.subscriber.send_threshold_command(agent_id, threshold_type, config)
+        
+        if command_id:
+            print(f"📤 Threshold configuration sent with ID: {command_id}")
+            print("⏳ Waiting for configuration result...")
+        else:
+            print("❌ Failed to send threshold configuration")
+            input("\nPress Enter to continue...")
+            return False
+        
+        # Wait and monitor for results
+        start_time = time.time()
+        max_wait_time = 15  # Wait up to 15 seconds (same as regular commands)
+        
+        while time.time() - start_time < max_wait_time:
+            time.sleep(1)
+            elapsed = time.time() - start_time
+            print(f"\r⏳ Waiting... ({elapsed:.1f}s/{max_wait_time}s)", end="", flush=True)
+            
+            # Get threshold results from the subscriber
+            threshold_results = self.subscriber.get_threshold_results()
+            result = threshold_results.get(command_id)
+            
+            if result:
+                success = result.get('success', False)
+                message = result.get('message', 'No message')
+                current_config = result.get('current_config', {})
+                
+                print(f"\n\n✅ Threshold Configuration Result:")
+                print(f"   Success: {success}")
+                print(f"   Message: {message}")
+                print(f"   Current Config: {current_config}")
+                
+                if success:
+                    print(f"🎉 Threshold configuration was successful!")
+                    print(f"🔄 The agent will now use the new {threshold_type} thresholds")
+                else:
+                    print("❌ Threshold configuration failed!")
+                
+                input("\nPress Enter to continue...")
+                return success
+        
+        print(f"\n\n⏰ Timeout waiting for threshold configuration result")
+        print("   The configuration was sent but no response was received.")
+        print("   This might mean:")
+        print("   • The target agent is not running")  
+        print("   • The context manager is not running")
+        print("   • Network connectivity issues")
+        input("\nPress Enter to continue...")
+        return False
+    
     def run(self):
         """Run the interactive dashboard."""
         self.print_header()
@@ -384,10 +648,12 @@ class InteractiveManualControlDashboard:
                 elif choice == '2':
                     self.handle_custom_command()
                 elif choice == '3':
-                    self.show_agent_presets()
+                    self.handle_threshold_configuration()
                 elif choice == '4':
-                    self.show_help()
+                    self.show_agent_presets()
                 elif choice == '5':
+                    self.show_help()
+                elif choice == '6':
                     self.running = False
                     
         except KeyboardInterrupt:

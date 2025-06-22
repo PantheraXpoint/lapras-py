@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class PhidgetIRController:
     """Base class for PhidgetIR control functionality"""
     
-    def __init__(self, serial=322207, code_handler=None):
+    def __init__(self, serial=164793, code_handler=None):
         """
         Initialize PhidgetIR controller
         
@@ -67,25 +67,6 @@ class PhidgetIRController:
             
         except PhidgetException as e:
             logger.error(f"Transmission failed: {e}")
-            return False
-    
-    def transmit_code(self, code, code_info):
-        """
-        Transmit IR code with code info
-        
-        Args:
-            code (str): Hex string code
-            code_info: CodeInfo object
-            
-        Returns:
-            bool: True if transmission successful, False otherwise
-        """
-        try:
-            self.ir_phidget.transmit(code, code_info)
-            return True
-            
-        except PhidgetException as e:
-            logger.error(f"Code transmission failed: {e}")
             return False
     
     def close(self):
@@ -174,57 +155,31 @@ class AirConditionerController(PhidgetIRController):
 import argparse
 import sys
 
-def execute_command(ac_controller, command):
-    """Execute a single command on the air conditioner"""
-    command_map = {
-        'on': ('Turning ON air conditioner', ac_controller.turn_on),
-        'off': ('Turning OFF air conditioner', ac_controller.turn_off),
-        'temp_up': ('Increasing temperature', ac_controller.temp_up),
-        'temp_down': ('Decreasing temperature', ac_controller.temp_down),
-        'up': ('Increasing temperature', ac_controller.temp_up),  # Alias
-        'down': ('Decreasing temperature', ac_controller.temp_down)  # Alias
-    }
-    
-    if command not in command_map:
-        print(f"Error: Unknown command '{command}'")
-        print("Available commands: on, off, temp_up, temp_down, up, down")
-        return False
-    
-    description, func = command_map[command]
-    print(f"{description}...")
-    
-    success = func()
-    if success:
-        print(f"✓ Command '{command}' sent successfully")
-        return True
-    else:
-        print(f"✗ Command '{command}' failed")
-        return False
-
 def main():
-    """Main function with command line argument support"""
+    """Main function for individual device control"""
     parser = argparse.ArgumentParser(
-        description='Control air conditioner using PhidgetIR',
+        description='Control individual air conditioner using PhidgetIR',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s on                    # Turn on air conditioner
-  %(prog)s off                   # Turn off air conditioner
-  %(prog)s temp_up               # Increase temperature
-  %(prog)s temp_down             # Decrease temperature
-  %(prog)s up                    # Increase temperature (alias)
-  %(prog)s down                  # Decrease temperature (alias)
-  %(prog)s --serial 12345 on     # Use specific device serial number
-  %(prog)s --test                # Run all commands in sequence
-  %(prog)s on off                # Execute multiple commands
+  %(prog)s --device 164793 on       # Turn on device 164793
+  %(prog)s --device 322207 off      # Turn off device 322207
+  %(prog)s --device 164793 temp_up  # Increase temp on device 164793
+  %(prog)s --device 322207 temp_down # Decrease temp on device 322207
+  %(prog)s on                       # Use any available device
         """
     )
     
     parser.add_argument(
-        'commands', 
-        nargs='*', 
+        'command',
         choices=['on', 'off', 'temp_up', 'temp_down', 'up', 'down'],
-        help='Commands to execute (on, off, temp_up, temp_down, up, down)'
+        help='Command to execute'
+    )
+    
+    parser.add_argument(
+        '--device', '-dev',
+        type=int,
+        help='Device serial number (164793 or 322207)'
     )
     
     parser.add_argument(
@@ -234,88 +189,47 @@ Examples:
         help='PhidgetIR device serial number (default: any device)'
     )
     
-    parser.add_argument(
-        '--delay', '-d',
-        type=float,
-        default=1.0,
-        help='Delay between commands in seconds (default: 1.0)'
-    )
-    
-    parser.add_argument(
-        '--test', '-t',
-        action='store_true',
-        help='Run test sequence with all commands'
-    )
-    
-    parser.add_argument(
-        '--list-commands', '-l',
-        action='store_true',
-        help='List all available commands and exit'
-    )
-    
     args = parser.parse_args()
     
-    # Handle list commands
-    if args.list_commands:
-        print("Available commands:")
-        print("  on, off          - Turn air conditioner on/off")
-        print("  temp_up, up      - Increase temperature")
-        print("  temp_down, down  - Decrease temperature")
-        return
-    
-    # Handle no arguments
-    if not args.commands and not args.test:
-        parser.print_help()
-        return
+    # Determine which device to use
+    if args.device:
+        device_serial = args.device
+        print(f"Using device {device_serial}")
+    else:
+        device_serial = args.serial
+        print(f"Using device {device_serial if device_serial >= 0 else 'any available'}")
     
     try:
-        # Create controller
-        print(f"Initializing Air Conditioner Controller (serial: {args.serial if args.serial >= 0 else 'any'})...")
-        ac_controller = AirConditionerController(args.serial)
+        # Create controller for the specified device
+        ac_controller = AirConditionerController(device_serial)
         print("Air Conditioner Controller ready!")
         
-        success_count = 0
-        total_commands = 0
+        # Execute the command
+        command_map = {
+            'on': ('Turning ON air conditioner', ac_controller.turn_on),
+            'off': ('Turning OFF air conditioner', ac_controller.turn_off),
+            'temp_up': ('Increasing temperature', ac_controller.temp_up),
+            'temp_down': ('Decreasing temperature', ac_controller.temp_down),
+            'up': ('Increasing temperature', ac_controller.temp_up),
+            'down': ('Decreasing temperature', ac_controller.temp_down)
+        }
         
-        if args.test:
-            # Run test sequence
-            print("\nRunning test sequence...")
-            test_commands = ['on', 'temp_up', 'temp_down', 'off']
-            
-            for i, command in enumerate(test_commands):
-                print(f"\n[{i+1}/{len(test_commands)}] ", end="")
-                if execute_command(ac_controller, command):
-                    success_count += 1
-                total_commands += 1
-                
-                # Add delay between commands (except for the last one)
-                if i < len(test_commands) - 1:
-                    time.sleep(args.delay)
+        description, func = command_map[args.command]
+        print(f"{description}...")
         
+        success = func()
+        if success:
+            print(f"✓ Command '{args.command}' sent successfully")
+            result_code = 0
         else:
-            # Execute provided commands
-            for i, command in enumerate(args.commands):
-                if len(args.commands) > 1:
-                    print(f"\n[{i+1}/{len(args.commands)}] ", end="")
-                
-                if execute_command(ac_controller, command):
-                    success_count += 1
-                total_commands += 1
-                
-                # Add delay between commands (except for the last one)
-                if i < len(args.commands) - 1:
-                    time.sleep(args.delay)
-        
-        # Summary
-        if total_commands > 1:
-            print(f"\nSummary: {success_count}/{total_commands} commands executed successfully")
+            print(f"✗ Command '{args.command}' failed")
+            result_code = 1
         
         # Close controller
         ac_controller.close()
-        print("\nController closed.")
+        print("Controller closed.")
         
-        # Exit with appropriate code
-        sys.exit(0 if success_count == total_commands else 1)
+        sys.exit(result_code)
         
     except PhidgetException as e:
         print(f"Phidget error: {e}")

@@ -93,6 +93,24 @@ class ActionReportPayload:
     message: Optional[str] = None
     new_state: Optional[Dict[str, Any]] = None
 
+# Add new payload classes for threshold configuration
+@dataclass
+class ThresholdConfigPayload:
+    """Payload for thresholdConfig events (threshold management)."""
+    threshold_type: str  # "light", "temperature"
+    agent_id: str
+    config: Dict[str, Any]  # threshold values and parameters
+
+@dataclass
+class ThresholdConfigResultPayload:
+    """Payload for thresholdConfigResult events (threshold configuration response)."""
+    command_id: str
+    success: bool
+    message: str
+    agent_id: str
+    threshold_type: str
+    current_config: Dict[str, Any]
+
 class EventFactory:
     """Factory class to create standardized events."""
     
@@ -452,6 +470,92 @@ class EventFactory:
             }
         )
 
+    @staticmethod
+    def create_threshold_config_event(
+        agent_id: str,
+        threshold_type: str,  # "light", "temperature"
+        config: Dict[str, Any],
+        source_entity_id: str = "Dashboard"
+    ) -> Event:
+        """Create a thresholdConfig event for dynamic threshold management."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="thresholdConfig",
+                priority="Normal"
+            ),
+            source=EntityInfo(
+                entityType="dashboard",
+                entityId=source_entity_id
+            ),
+            payload=asdict(ThresholdConfigPayload(
+                threshold_type=threshold_type,
+                agent_id=agent_id,
+                config=config
+            ))
+        )
+
+    @staticmethod
+    def create_threshold_config_result_event(
+        agent_id: str,
+        command_id: str,
+        success: bool,
+        message: str,
+        threshold_type: str,
+        current_config: Dict[str, Any]
+    ) -> Event:
+        """Create a thresholdConfigResult event from virtual agent back to context manager."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="thresholdConfigResult"
+            ),
+            source=EntityInfo(
+                entityType="virtualAgent",
+                entityId=agent_id
+            ),
+            payload=asdict(ThresholdConfigResultPayload(
+                command_id=command_id,
+                success=success,
+                message=message,
+                agent_id=agent_id,
+                threshold_type=threshold_type,
+                current_config=current_config
+            ))
+        )
+
+    @staticmethod
+    def create_dashboard_threshold_command_result_event(
+        command_id: str,
+        success: bool,
+        message: str,
+        agent_id: str,
+        threshold_type: str,
+        current_config: Dict[str, Any]
+    ) -> Event:
+        """Create a dashboardThresholdCommandResult event for threshold configuration command results."""
+        return Event(
+            event=EventMetadata(
+                id="",
+                timestamp="",
+                type="dashboardThresholdCommandResult"
+            ),
+            source=EntityInfo(
+                entityType="contextManager",
+                entityId="CM-MainController"
+            ),
+            payload={
+                "command_id": command_id,
+                "success": success,
+                "message": message,
+                "agent_id": agent_id,
+                "threshold_type": threshold_type,
+                "current_config": current_config
+            }
+        )
+
 class MQTTMessage:
     """Utility class for MQTT message serialization/deserialization."""
     
@@ -487,6 +591,10 @@ class MQTTMessage:
             return ActionPayload(**event.payload)
         elif payload_class == ActionReportPayload:
             return ActionReportPayload(**event.payload)
+        elif payload_class == ThresholdConfigPayload:
+            return ThresholdConfigPayload(**event.payload)
+        elif payload_class == ThresholdConfigResultPayload:
+            return ThresholdConfigResultPayload(**event.payload)
         else:
             return event.payload
 
@@ -573,4 +681,25 @@ class TopicManager:
     @staticmethod
     def dashboard_sensor_config_result() -> str:
         """Topic for dashboard sensor configuration command results."""
-        return "dashboard/sensor/config/result" 
+        return "dashboard/sensor/config/result"
+
+    # THRESHOLD CONFIGURATION TOPICS
+    @staticmethod
+    def dashboard_threshold_command() -> str:
+        """Topic for threshold configuration commands from dashboard."""
+        return "dashboard/threshold/command"
+    
+    @staticmethod
+    def dashboard_threshold_result() -> str:
+        """Topic for threshold configuration command results."""
+        return "dashboard/threshold/result"
+    
+    @staticmethod
+    def threshold_config_command(agent_id: str) -> str:
+        """Topic for threshold configuration commands for a specific agent."""
+        return f"agent/{agent_id}/thresholdConfig"
+    
+    @staticmethod
+    def threshold_config_result(agent_id: str) -> str:
+        """Topic for threshold configuration command results."""
+        return f"agent/{agent_id}/thresholdConfig/result" 

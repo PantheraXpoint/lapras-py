@@ -35,7 +35,8 @@ class EnhancedDashboardSubscriber:
         self.context_topic = "dashboard/context/state"
         self.dashboard_agent_topic = "virtual/dashboard/to/context/updateContext"
         self.command_result_topic = "dashboard/control/result"
-        
+        self.threshold_result_topic = "dashboard/threshold/result"
+
         # Store data from both sources
         self.context_data = {}
         self.sensor_data = {}
@@ -43,7 +44,7 @@ class EnhancedDashboardSubscriber:
         # 모든 센서 데이터를 저장할 통합 딕셔너리
         self.all_sensors = {}
         self.all_agents = {}
-        
+
         # 명령 관련
         self.command_results = {}  # 명령 결과 저장
         self.last_context_update = 0
@@ -115,6 +116,10 @@ class EnhancedDashboardSubscriber:
             result3 = self.mqtt_client.subscribe(self.command_result_topic, qos=1)
             logger.info(f"Subscribed to command result topic: {self.command_result_topic} (result: {result3})")
             
+            # Subscribe to threshold configuration results
+            result4 = self.mqtt_client.subscribe(self.threshold_result_topic, qos=1)
+            logger.info(f"Subscribed to threshold result topic: {self.threshold_result_topic} (result: {result4})")
+
         else:
             logger.error(f"Failed to connect to MQTT broker. Result code: {rc}")
 
@@ -283,6 +288,12 @@ class EnhancedDashboardSubscriber:
                         
                         self._handle_command_result(message_data["payload"])
             
+            # Handle threshold configuration result messages
+            elif msg.topic == self.threshold_result_topic:
+                if "event" in message_data and message_data["event"].get("type") == "dashboardThresholdCommandResult":
+                    if "payload" in message_data:
+                        self._handle_threshold_result(message_data["payload"])
+
             # 메시지를 받은 후 Streamlit 재실행 - 만약 Streamlit 환경에서 실행 중이라면
             try:
                 # self.st가 설정되어 있는 경우에만 rerun 수행
@@ -819,6 +830,74 @@ class EnhancedDashboardSubscriber:
         """모든 센서 데이터를 하나의 딕셔너리로 반환합니다."""
         # 저장된 모든 센서 데이터 반환
         return self.all_sensors.copy()
+
+    def _handle_threshold_result(self, payload):
+        """Handle threshold configuration result message."""
+        command_id = payload.get('command_id')
+        if not command_id:
+            return
+
+        # Store the threshold result
+        if not hasattr(self, 'threshold_results'):
+            self.threshold_results = {}
+        self.threshold_results[command_id] = payload
+
+        # Debug output
+        success = payload.get('success', False)
+        message = payload.get('message', 'No message')
+        agent_id = payload.get('agent_id', 'unknown')
+        threshold_type = payload.get('threshold_type', 'unknown')
+
+    def send_threshold_command(self, agent_id: str, threshold_type: str, config: dict):
+        """
+        Send threshold configuration command to ContextRuleManager.
+
+        Args:
+            agent_id: Target agent ID (e.g., "hue_light", "aircon")
+            threshold_type: Type of threshold ("light", "temperature")
+            config: Configuration dictionary with threshold values
+        """
+        if hasattr(self, 'mqtt_client'):
+            import uuid
+            import time
+            command_id = f"threshold-{uuid.uuid4().hex[:8]}"
+
+            # Create proper Event structure for threshold configuration
+            threshold_command_event = {
+                "event": {
+                    "id": command_id,
+                    "timestamp": list(time.gmtime()),
+                    "type": "dashboardThresholdCommand",
+                    "location": None,
+                    "contextType": None,
+                    "priority": "High"
+                },
+                "source": {
+                    "entityType": "dashboard",
+                    "entityId": "dashboard-streamlit"
+                },
+                "target": {
+                    "entityType": "virtualAgent",
+                    "entityId": agent_id
+                },
+                "payload": {
+                    "agent_id": agent_id,
+                    "threshold_type": threshold_type,
+                    "config": config
+                }
+            }
+
+            # Send the threshold configuration message
+            command_message = json.dumps(threshold_command_event)
+            self.mqtt_client.publish("dashboard/threshold/command", command_message, qos=1)
+
+            return command_id
+
+    def get_threshold_results(self):
+        """Get the threshold configuration results."""
+        if not hasattr(self, 'threshold_results'):
+            self.threshold_results = {}
+        return self.threshold_results
 
     def get_all_agents(self):
         return self.all_agents.copy()

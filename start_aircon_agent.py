@@ -20,7 +20,7 @@ def parse_sensor_config(sensor_args):
     
     for arg in sensor_args:
         if ":" in arg:
-            # Format: sensor_type:sensor1,sensor2,sensor3
+            # Format: sensor_type:sensor1,sensor2
             sensor_type, sensor_list = arg.split(":", 1)
             sensor_ids = [s.strip() for s in sensor_list.split(",") if s.strip()]
             if sensor_ids:
@@ -41,8 +41,6 @@ def main():
                        help='MQTT broker address (default: 143.248.57.73)')
     parser.add_argument('--mqtt-port', type=int, default=1883,
                        help='MQTT broker port (default: 1883)')
-    parser.add_argument('--phidget-serial', type=int, default=-1,
-                       help='Phidget IR device serial number (-1 for any device, default: -1)')
     parser.add_argument('--sensors', '-s', nargs='*',
                        help='Sensor configuration. Format: sensor_type:sensor1,sensor2. ' + 
                             'Examples: infrared:infrared_1,infrared_2 motion:motion_01,motion_02 activity:activity_s1a,activity_s2a')
@@ -77,6 +75,8 @@ def main():
         elif args.preset == 'all-sensors':
             sensor_config = {
                 "infrared": ["infrared_1", "infrared_2", "infrared_3", "infrared_4"],
+                "distance": ["distance_1", "distance_2", "distance_3", "distance_4"],
+                "temperature": ["temperature_1"],
                 "motion": ["motion_01", "motion_02", "motion_03", "motion_04", "motion_05", "motion_06", "motion_07", "motion_08", "motion_mp1", "motion_mf1","motion_mb1"],
                 "activity": ["activity_s1b", "activity_s2a", "activity_s3a", "activity_s4a","activity_s5a","activity_s6a","activity_s2b","activity_s3b","activity_s4b","activity_s5b","activity_s6b","activity_s7b"]
             }
@@ -97,8 +97,7 @@ def main():
             mqtt_broker=args.mqtt_broker,
             mqtt_port=args.mqtt_port,
             sensor_config=sensor_config,
-            transmission_interval=args.transmission_interval,
-            phidget_serial=args.phidget_serial
+            transmission_interval=args.transmission_interval
         )
         logger.info("[AIRCON] Aircon virtual agent initialized and started")
         
@@ -107,7 +106,7 @@ def main():
         logger.info(f"[AIRCON]   Agent ID: {args.agent_id}")
         logger.info(f"[AIRCON]   Transmission interval: {args.transmission_interval}s")
         logger.info(f"[AIRCON]   MQTT: {args.mqtt_broker}:{args.mqtt_port}")
-        logger.info(f"[AIRCON]   Phidget Serial: {args.phidget_serial}")
+        logger.info(f"[AIRCON]   IR Devices: 322207, 164793 (hardcoded)")
         logger.info(f"[AIRCON]   Sensor types: {list(agent.sensor_config.keys())}")
         for sensor_type, sensor_ids in agent.sensor_config.items():
             logger.info(f"[AIRCON]     {sensor_type}: {sensor_ids}")
