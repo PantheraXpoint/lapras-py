@@ -36,8 +36,7 @@ class LightHueAgent(VirtualAgent):
 
         # Light sensor configuration for bright/dark classification - NOW DYNAMIC
         self.light_threshold_config = {
-            "threshold": light_threshold,  # lux threshold: below = dark, above = bright
-            "hysteresis": 5.0,  # Hysteresis to prevent rapid switching
+            "threshold": light_threshold,
             "last_update": time.time()
         }
 
@@ -284,20 +283,9 @@ class LightHueAgent(VirtualAgent):
             try:
                 lux_value = float(sensor_payload.value)
                 current_threshold = self.light_threshold_config["threshold"]
-                hysteresis = self.light_threshold_config.get("hysteresis", 5.0)
                 
-                # Use hysteresis to prevent rapid switching
-                current_status = self.local_state.get("light_status", "unknown")
-                
-                if current_status == "dark":
-                    # When currently dark, need higher threshold + hysteresis to become bright
-                    light_status = "bright" if lux_value >= (current_threshold + hysteresis) else "dark"
-                elif current_status == "bright":
-                    # When currently bright, need lower threshold - hysteresis to become dark
-                    light_status = "dark" if lux_value <= (current_threshold - hysteresis) else "bright"
-                else:
-                    # Unknown status, use simple threshold
-                    light_status = "bright" if lux_value >= current_threshold else "dark"
+                # Simple threshold logic: if lux_value < threshold then dark, else bright
+                light_status = "dark" if lux_value < current_threshold else "bright"
                 
                 if self.local_state.get("light_status") != light_status:
                     self.local_state["light_status"] = light_status
@@ -735,79 +723,93 @@ class LightHueAgent(VirtualAgent):
             logger.error(f"[{self.agent_id}] Error handling threshold config message: {e}")
 
     def _process_threshold_config(self, threshold_payload: ThresholdConfigPayload, command_id: str):
-        """Process threshold configuration update."""
+        """Process threshold configuration command from dashboard."""
         try:
             if threshold_payload.threshold_type != "light":
                 result_event = EventFactory.create_threshold_config_result_event(
-                    agent_id=self.agent_id,
                     command_id=command_id,
                     success=False,
                     message=f"Unsupported threshold type: {threshold_payload.threshold_type}",
+                    agent_id=self.agent_id,
                     threshold_type=threshold_payload.threshold_type,
-                    current_config=self.light_threshold_config.copy()
+                    current_config={}
                 )
                 self._publish_threshold_config_result(result_event)
                 return
-
-            config = threshold_payload.config
-            success = False
-            message = ""
             
-            with self.state_lock:
-                old_threshold = self.light_threshold_config["threshold"]
+            # Extract threshold configuration
+            new_config = threshold_payload.config
+            
+            # Validate threshold value
+            if "threshold" not in new_config:
+                result_event = EventFactory.create_threshold_config_result_event(
+                    command_id=command_id,
+                    success=False,
+                    message="Missing 'threshold' in configuration",
+                    agent_id=self.agent_id,
+                    threshold_type=threshold_payload.threshold_type,
+                    current_config=self.light_threshold_config
+                )
+                self._publish_threshold_config_result(result_event)
+                return
                 
-                # Update threshold configuration
-                if "threshold" in config:
-                    new_threshold = float(config["threshold"])
-                    if 0 <= new_threshold <= 1000:  # Reasonable lux range
-                        self.light_threshold_config["threshold"] = new_threshold
-                        self.light_threshold_config["last_update"] = time.time()
-                        
-                        # Update local state to reflect new threshold
-                        self.local_state["light_threshold"] = new_threshold
-                        
-                        # Optionally update hysteresis
-                        if "hysteresis" in config:
-                            hysteresis = float(config["hysteresis"])
-                            if 0 <= hysteresis <= 50:
-                                self.light_threshold_config["hysteresis"] = hysteresis
-                        
-                        success = True
-                        message = f"Light threshold updated from {old_threshold} to {new_threshold} lux"
-                        logger.info(f"[{self.agent_id}] {message}")
-                        
-                        # Re-evaluate current light status with new threshold
-                        self._reevaluate_light_status()
-                        
-                    else:
-                        message = f"Invalid threshold value: {new_threshold}. Must be between 0-1000 lux"
-                else:
-                    message = "No threshold value provided in configuration"
-
-            # Send result back
+            try:
+                new_threshold = float(new_config["threshold"])
+                if new_threshold <= 0:
+                    raise ValueError("Threshold must be positive")
+            except (ValueError, TypeError) as e:
+                result_event = EventFactory.create_threshold_config_result_event(
+                    command_id=command_id,
+                    success=False,
+                    message=f"Invalid threshold value: {new_config['threshold']} - {str(e)}",
+                    agent_id=self.agent_id,
+                    threshold_type=threshold_payload.threshold_type,
+                    current_config=self.light_threshold_config
+                )
+                self._publish_threshold_config_result(result_event)
+                return
+            
+            # Store old threshold for logging
+            old_threshold = self.light_threshold_config["threshold"]
+            
+            # Update threshold configuration
+            with self.state_lock:
+                self.light_threshold_config.update({
+                    "threshold": new_threshold,
+                    "last_update": time.time()
+                })
+                
+                # Also update the local_state field that gets sent to context manager
+                self.local_state["light_threshold"] = new_threshold
+            
+            # Re-evaluate light status with new threshold
+            self._reevaluate_light_status()
+            
+            # Trigger state publication to update context manager with new threshold
+            self._trigger_state_publication()
+            
+            # Send success response
             result_event = EventFactory.create_threshold_config_result_event(
-                agent_id=self.agent_id,
                 command_id=command_id,
-                success=success,
-                message=message,
-                threshold_type="light",
+                success=True,
+                message=f"Light threshold updated from {old_threshold} to {new_threshold} lux",
+                agent_id=self.agent_id,
+                threshold_type=threshold_payload.threshold_type,
                 current_config=self.light_threshold_config.copy()
             )
             self._publish_threshold_config_result(result_event)
             
-            if success:
-                # Trigger state publication to update context manager
-                self._trigger_state_publication()
-                
+            logger.info(f"[{self.agent_id}] Light threshold updated: {old_threshold} → {new_threshold} lux")
+            
         except Exception as e:
-            logger.error(f"[{self.agent_id}] Error processing threshold config: {e}")
+            logger.error(f"[{self.agent_id}] Error processing threshold config: {e}", exc_info=True)
             result_event = EventFactory.create_threshold_config_result_event(
-                agent_id=self.agent_id,
                 command_id=command_id,
                 success=False,
                 message=f"Error processing threshold config: {str(e)}",
-                threshold_type="light",
-                current_config=self.light_threshold_config.copy()
+                agent_id=self.agent_id,
+                threshold_type=threshold_payload.threshold_type,
+                current_config=self.light_threshold_config
             )
             self._publish_threshold_config_result(result_event)
 
@@ -835,24 +837,17 @@ class LightHueAgent(VirtualAgent):
             try:
                 lux_value = float(latest_light_data["value"])
                 current_threshold = self.light_threshold_config["threshold"]
-                hysteresis = self.light_threshold_config.get("hysteresis", 5.0)
                 
-                # Use hysteresis to prevent rapid switching
-                current_status = self.local_state.get("light_status", "unknown")
+                # Simple threshold logic: if lux_value < threshold then dark, else bright
+                light_status = "dark" if lux_value < current_threshold else "bright"
                 
-                if current_status == "dark":
-                    # When currently dark, need higher threshold + hysteresis to become bright
-                    new_status = "bright" if lux_value >= (current_threshold + hysteresis) else "dark"
-                elif current_status == "bright":
-                    # When currently bright, need lower threshold - hysteresis to become dark
-                    new_status = "dark" if lux_value <= (current_threshold - hysteresis) else "bright"
-                else:
-                    # Unknown status, use simple threshold
-                    new_status = "bright" if lux_value >= current_threshold else "dark"
-                
-                if self.local_state.get("light_status") != new_status:
-                    self.local_state["light_status"] = new_status
-                    logger.info(f"[{self.agent_id}] Re-evaluated light_status to: {new_status} (lux: {lux_value}, threshold: {current_threshold})")
+                old_light_status = self.local_state.get("light_status")
+                if old_light_status != light_status:
+                    self.local_state["light_status"] = light_status
+                    logger.info(f"[{self.agent_id}] Re-evaluated light_status to: {light_status} (lux: {lux_value}, threshold: {current_threshold})")
+                    
+                    # Trigger state publication to update context manager with new light status
+                    self._trigger_state_publication()
                 
             except (ValueError, TypeError) as e:
                 logger.warning(f"[{self.agent_id}] Could not re-evaluate light status: {e}")
