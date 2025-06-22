@@ -1,0 +1,52 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Aircon motion + temperature sensor rules ---
+
+# Turn ON cooling when motion is detected AND temperature is hot
+lapras:AirconCoolOnWhenMotionAndHotRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsMotionCondition ;
+    lapras:hasCondition lapras:IsTemperatureHotCondition ;
+    lapras:hasAction lapras:SetAirconCoolOn .
+
+# Turn ON heating when motion is detected AND temperature is cool
+lapras:AirconHeatOnWhenMotionAndCoolRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsMotionCondition ;
+    lapras:hasCondition lapras:IsTemperatureCoolCondition ;
+    lapras:hasAction lapras:SetAirconHeatOn .
+
+# Turn OFF aircon when no motion is detected (regardless of temperature)
+lapras:AirconOffWhenNoMotionRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsNoMotionCondition ;
+    lapras:hasAction lapras:SetAirconPowerOff .
+
+# Conditions
+lapras:IsMotionCondition
+    lapras:hasSensor "motion_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "motion" .
+
+lapras:IsNoMotionCondition
+    lapras:hasSensor "motion_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "no_motion" .
+
+lapras:IsTemperatureHotCondition
+    lapras:hasSensor "temperature_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "hot" .
+
+lapras:IsTemperatureCoolCondition
+    lapras:hasSensor "temperature_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "cool" .
+
+# Actions
+lapras:SetAirconCoolOn lapras:hasStateUpdate '{"power": "on", "mode": "cool"}' .
+lapras:SetAirconHeatOn lapras:hasStateUpdate '{"power": "on", "mode": "heat"}' .
+lapras:SetAirconPowerOff lapras:hasStateUpdate '{"power": "off"}' . 

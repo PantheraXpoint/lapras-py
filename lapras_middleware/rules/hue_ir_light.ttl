@@ -5,7 +5,7 @@
 
 # --- Hue light infrared + light sensor rules ---
 # Turn ON light when person is near AND light is dark
-# Turn OFF light when person is far OR light is bright
+# Turn OFF light when person is far (regardless of brightness)
 
 # Turn ON light when person is near AND light is dark
 lapras:HueLightOnWhenNearAndDarkRule a lapras:Rule ;
@@ -39,12 +39,7 @@ lapras:HueLightOffWhenFarRule a lapras:Rule ;
     lapras:hasCondition lapras:IsFarCondition ;
     lapras:hasAction lapras:SetHueLightPowerOff .
 
-# Turn OFF light when light becomes bright (daylight override)
-lapras:HueLightOffWhenBrightRule a lapras:Rule ;
-    lapras:hasAgent "hue_light" ;
-    lapras:hasCondition lapras:IsLightOnCondition ;
-    lapras:hasCondition lapras:IsBrightCondition ;
-    lapras:hasAction lapras:SetHueLightPowerOffFromBright .
+
 
 lapras:IsLightOnCondition
     lapras:hasSensor "power" ;
@@ -61,5 +56,4 @@ lapras:IsBrightCondition
     lapras:hasOperator lapras:equals ;
     lapras:hasValue "bright" .
 
-lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' .
-lapras:SetHueLightPowerOffFromBright lapras:hasStateUpdate '{"power": "off"}' . 
+lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' . 

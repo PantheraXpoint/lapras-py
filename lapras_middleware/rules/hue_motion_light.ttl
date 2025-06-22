@@ -5,7 +5,7 @@
 
 # --- Hue light motion + light sensor rules ---
 # Turn ON light when motion is detected AND light is dark
-# Turn OFF light when no motion OR light is bright
+# Turn OFF light when no motion (regardless of brightness)
 
 # Turn ON light when motion is detected AND light is dark
 lapras:HueLightOnWhenMotionAndDarkRule a lapras:Rule ;
@@ -39,12 +39,7 @@ lapras:HueLightOffWhenNoMotionRule a lapras:Rule ;
     lapras:hasCondition lapras:IsNoMotionCondition ;
     lapras:hasAction lapras:SetHueLightPowerOff .
 
-# Turn OFF light when light becomes bright (daylight override)
-lapras:HueLightOffWhenBrightRule a lapras:Rule ;
-    lapras:hasAgent "hue_light" ;
-    lapras:hasCondition lapras:IsLightOnCondition ;
-    lapras:hasCondition lapras:IsBrightCondition ;
-    lapras:hasAction lapras:SetHueLightPowerOffFromBright .
+
 
 lapras:IsLightOnCondition
     lapras:hasSensor "power" ;
@@ -61,5 +56,4 @@ lapras:IsBrightCondition
     lapras:hasOperator lapras:equals ;
     lapras:hasValue "bright" .
 
-lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' .
-lapras:SetHueLightPowerOffFromBright lapras:hasStateUpdate '{"power": "off"}' . 
+lapras:SetHueLightPowerOff lapras:hasStateUpdate '{"power": "off"}' . 
