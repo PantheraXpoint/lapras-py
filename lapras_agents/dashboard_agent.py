@@ -31,6 +31,7 @@ class DashboardAgent(VirtualAgent):
         if sensor_config is None:
             sensor_config = {
                 "infrared": ["infrared_1", "infrared_2"],
+                "distance": ["distance_1", "distance_2", "distance_3", "distance_4"],  # Add distance sensors
                 "motion": ["motion_01", "motion_02", "motion_03", "motion_04", "motion_05", "motion_06", "motion_07", "motion_08", "motion_mp1", "motion_mf1", "motion_mb1"],
                 "temperature": ["temperature_1", "temperature_2","temperature_3"],
                 "door": ["door_01"],
@@ -40,7 +41,7 @@ class DashboardAgent(VirtualAgent):
             }
         
         self.sensor_config = sensor_config
-        self.supported_sensor_types = ["infrared", "motion", "temperature", "door", "activity", "light", "tilt"]
+        self.supported_sensor_types = ["infrared", "distance", "motion", "temperature", "door", "activity", "light", "tilt"]
         
         # Store sensor data with timestamps for staleness detection
         self.sensor_data = defaultdict(dict)  # sensor_id -> sensor_data
@@ -133,6 +134,8 @@ class DashboardAgent(VirtualAgent):
         # Process based on sensor type
         if sensor_payload.sensor_type == "infrared":
             self._process_infrared_sensor(sensor_payload, sensor_id, current_time)
+        elif sensor_payload.sensor_type == "distance":
+            self._process_distance_sensor(sensor_payload, sensor_id, current_time)
         elif sensor_payload.sensor_type == "motion":
             self._process_motion_sensor(sensor_payload, sensor_id, current_time)
         elif sensor_payload.sensor_type == "temperature":
@@ -159,6 +162,17 @@ class DashboardAgent(VirtualAgent):
     
     def _process_infrared_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
         """Process infrared sensor updates."""
+        with self.state_lock:
+            self.sensor_data[sensor_id] = {
+                "sensor_type": sensor_payload.sensor_type,
+                "value": sensor_payload.value,
+                "unit": sensor_payload.unit,
+                "metadata": sensor_payload.metadata,
+                "last_update": current_time
+            }
+    
+    def _process_distance_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
+        """Process distance sensor updates."""
         with self.state_lock:
             self.sensor_data[sensor_id] = {
                 "sensor_type": sensor_payload.sensor_type,
@@ -243,10 +257,10 @@ class DashboardAgent(VirtualAgent):
             sensors_online = 0
             sensors_offline = 0
             
-            for sensor_id in self.sensor_config.get("infrared", []) + self.sensor_config.get("motion", []) + \
-                           self.sensor_config.get("temperature", []) + self.sensor_config.get("door", []) + \
-                           self.sensor_config.get("activity", []) + self.sensor_config.get("light", []) + \
-                           self.sensor_config.get("tilt", []):
+            for sensor_id in self.sensor_config.get("infrared", []) + self.sensor_config.get("distance", []) + \
+                           self.sensor_config.get("motion", []) + self.sensor_config.get("temperature", []) + \
+                           self.sensor_config.get("door", []) + self.sensor_config.get("activity", []) + \
+                           self.sensor_config.get("light", []) + self.sensor_config.get("tilt", []):
                 if sensor_id in self.sensor_last_seen:
                     if current_time - self.sensor_last_seen[sensor_id] < 30:
                         sensors_online += 1
@@ -261,6 +275,10 @@ class DashboardAgent(VirtualAgent):
             # Count active sensors by type
             infrared_active = sum(1 for sensor_id in self.sensor_config.get("infrared", []) 
                                 if sensor_id in self.sensor_data and 
+                                self.sensor_data[sensor_id].get("metadata", {}).get("proximity_status") == "near")
+            
+            distance_active = sum(1 for sensor_id in self.sensor_config.get("distance", [])
+                                if sensor_id in self.sensor_data and
                                 self.sensor_data[sensor_id].get("metadata", {}).get("proximity_status") == "near")
             
             motion_active = sum(1 for sensor_id in self.sensor_config.get("motion", [])
@@ -290,6 +308,7 @@ class DashboardAgent(VirtualAgent):
             # Update activity summary
             self.local_state["activity_summary"] = {
                 "infrared_active": infrared_active,
+                "distance_active": distance_active,
                 "motion_active": motion_active,
                 "temperature_alerts": temperature_alerts,
                 "doors_open": doors_open,
@@ -299,7 +318,7 @@ class DashboardAgent(VirtualAgent):
             }
             
             # Update last activity time if any activity detected
-            if any([infrared_active, motion_active, activity_detected]):
+            if any([infrared_active, distance_active, motion_active, activity_detected]):
                 self.local_state["last_activity_time"] = current_time
     
     def _schedule_transmission(self):
@@ -340,7 +359,7 @@ class DashboardAgent(VirtualAgent):
             with self.state_lock:
                 summary = self.local_state.get("activity_summary", {})
                 logger.info(f"[{self.agent_id}] Dashboard summary - Online: {self.local_state.get('sensors_online', 0)}/{self.local_state.get('total_sensors', 0)}, "
-                           f"Activity: IR={summary.get('infrared_active', 0)}, Motion={summary.get('motion_active', 0)}, "
+                           f"Activity: IR={summary.get('infrared_active', 0)}, Dist={summary.get('distance_active', 0)}, Motion={summary.get('motion_active', 0)}, "
                            f"Temp alerts={summary.get('temperature_alerts', 0)}, Doors open={summary.get('doors_open', 0)}, "
                            f"Activity={summary.get('activity_detected', 0)}, Light alerts={summary.get('light_alerts', 0)}, "
                            f"Tilt alerts={summary.get('tilt_alerts', 0)}")
