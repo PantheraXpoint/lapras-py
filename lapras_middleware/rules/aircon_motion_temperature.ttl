@@ -12,13 +12,6 @@ lapras:AirconCoolOnWhenMotionAndHotRule a lapras:Rule ;
     lapras:hasCondition lapras:IsTemperatureHotCondition ;
     lapras:hasAction lapras:SetAirconCoolOn .
 
-# Turn ON heating when motion is detected AND temperature is cool
-lapras:AirconHeatOnWhenMotionAndCoolRule a lapras:Rule ;
-    lapras:hasAgent "aircon" ;
-    lapras:hasCondition lapras:IsMotionCondition ;
-    lapras:hasCondition lapras:IsTemperatureCoolCondition ;
-    lapras:hasAction lapras:SetAirconHeatOn .
-
 # Turn OFF aircon when no motion is detected (regardless of temperature)
 lapras:AirconOffWhenNoMotionRule a lapras:Rule ;
     lapras:hasAgent "aircon" ;
@@ -48,5 +41,4 @@ lapras:IsTemperatureCoolCondition
 
 # Actions
 lapras:SetAirconCoolOn lapras:hasStateUpdate '{"power": "on", "mode": "cool"}' .
-lapras:SetAirconHeatOn lapras:hasStateUpdate '{"power": "on", "mode": "heat"}' .
 lapras:SetAirconPowerOff lapras:hasStateUpdate '{"power": "off"}' . 

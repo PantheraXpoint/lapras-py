@@ -82,11 +82,11 @@ class InteractiveManualControlDashboard:
                 "description": "Temperature Threshold Configuration",
                 "threshold_type": "temperature",
                 "presets": {
-                    "cool_preference": {"threshold": 22.0, "hysteresis": 1.0, "description": "Cool preference (22°C)"},
-                    "normal_comfort": {"threshold": 24.0, "hysteresis": 1.0, "description": "Normal comfort (24°C)"},
-                    "warm_preference": {"threshold": 26.0, "hysteresis": 1.0, "description": "Warm preference (26°C)"},
-                    "energy_saving": {"threshold": 28.0, "hysteresis": 2.0, "description": "Energy saving (28°C)"},
-                    "custom": {"threshold": 24.0, "hysteresis": 1.0, "description": "Custom threshold"}
+                    "cool_preference": {"threshold": 22.0, "description": "Cool preference (22°C)"},
+                    "normal_comfort": {"threshold": 24.0, "description": "Normal comfort (24°C)"},
+                    "warm_preference": {"threshold": 26.0, "description": "Warm preference (26°C)"},
+                    "energy_saving": {"threshold": 28.0, "description": "Energy saving (28°C)"},
+                    "custom": {"threshold": 24.0, "description": "Custom threshold"}
                 }
             }
         }
@@ -534,12 +534,11 @@ class InteractiveManualControlDashboard:
                 print("• Typical range: 15-35°C")
                 
                 threshold = float(input("Enter temperature threshold (°C): ").strip())
-                hysteresis = float(input("Enter hysteresis (default 1.0): ").strip() or "1.0")
                 
-                if 0 <= threshold <= 50 and 0 <= hysteresis <= 5:
-                    config = {"threshold": threshold, "hysteresis": hysteresis}
+                if 0 <= threshold <= 50:
+                    config = {"threshold": threshold}
                 else:
-                    print("❌ Invalid values. Threshold: 0-50°C, Hysteresis: 0-5°C")
+                    print("❌ Invalid threshold. Must be between 0-50°C")
                     return None
             
             return {

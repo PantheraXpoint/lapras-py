@@ -12,13 +12,6 @@ lapras:AirconCoolOnWhenNearAndHotRule a lapras:Rule ;
     lapras:hasCondition lapras:IsTemperatureHotCondition ;
     lapras:hasAction lapras:SetAirconCoolOn .
 
-# Turn ON heating when person is near AND temperature is cool
-lapras:AirconHeatOnWhenNearAndCoolRule a lapras:Rule ;
-    lapras:hasAgent "aircon" ;
-    lapras:hasCondition lapras:IsNearCondition ;
-    lapras:hasCondition lapras:IsTemperatureCoolCondition ;
-    lapras:hasAction lapras:SetAirconHeatOn .
-
 # Turn OFF aircon when person is far (regardless of temperature)
 lapras:AirconOffWhenFarRule a lapras:Rule ;
     lapras:hasAgent "aircon" ;
@@ -48,5 +41,4 @@ lapras:IsTemperatureCoolCondition
 
 # Actions
 lapras:SetAirconCoolOn lapras:hasStateUpdate '{"power": "on", "mode": "cool"}' .
-lapras:SetAirconHeatOn lapras:hasStateUpdate '{"power": "on", "mode": "heat"}' .
 lapras:SetAirconPowerOff lapras:hasStateUpdate '{"power": "off"}' . 

@@ -14,26 +14,12 @@ lapras:AirconCoolOnWhenNearAndHotRule a lapras:Rule ;
     lapras:hasCondition lapras:IsTemperatureHotCondition ;
     lapras:hasAction lapras:SetAirconCoolOn .
 
-# Turn ON heating when person is near AND temperature is cool
-lapras:AirconHeatOnWhenNearAndCoolRule a lapras:Rule ;
-    lapras:hasAgent "aircon" ;
-    lapras:hasCondition lapras:IsNearCondition ;
-    lapras:hasCondition lapras:IsTemperatureCoolCondition ;
-    lapras:hasAction lapras:SetAirconHeatOn .
-
 # Turn ON cooling when activity is detected AND temperature is hot
 lapras:AirconCoolOnWhenActiveAndHotRule a lapras:Rule ;
     lapras:hasAgent "aircon" ;
     lapras:hasCondition lapras:IsActiveCondition ;
     lapras:hasCondition lapras:IsTemperatureHotCondition ;
     lapras:hasAction lapras:SetAirconCoolOnFromActivity .
-
-# Turn ON heating when activity is detected AND temperature is cool
-lapras:AirconHeatOnWhenActiveAndCoolRule a lapras:Rule ;
-    lapras:hasAgent "aircon" ;
-    lapras:hasCondition lapras:IsActiveCondition ;
-    lapras:hasCondition lapras:IsTemperatureCoolCondition ;
-    lapras:hasAction lapras:SetAirconHeatOnFromActivity .
 
 # Turn OFF aircon when BOTH person is far AND activity is inactive
 lapras:AirconOffWhenFarAndInactiveRule a lapras:Rule ;
@@ -75,7 +61,5 @@ lapras:IsTemperatureCoolCondition
 
 # Actions
 lapras:SetAirconCoolOn lapras:hasStateUpdate '{"power": "on", "mode": "cool"}' .
-lapras:SetAirconHeatOn lapras:hasStateUpdate '{"power": "on", "mode": "heat"}' .
 lapras:SetAirconCoolOnFromActivity lapras:hasStateUpdate '{"power": "on", "mode": "cool"}' .
-lapras:SetAirconHeatOnFromActivity lapras:hasStateUpdate '{"power": "on", "mode": "heat"}' .
 lapras:SetAirconPowerOff lapras:hasStateUpdate '{"power": "off"}' . 

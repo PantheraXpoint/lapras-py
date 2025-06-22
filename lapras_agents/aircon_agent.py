@@ -37,10 +37,9 @@ class AirconAgent(VirtualAgent):
         self.sensor_config = sensor_config
         self.supported_sensor_types = ["infrared", "distance", "motion", "activity", "temperature"]
         
-        # Temperature threshold configuration for hot/cool classification - DYNAMIC (simplified like light)
+        # Temperature threshold configuration for hot/cool classification - DYNAMIC (simplified)
         self.temperature_threshold_config = {
             "threshold": temp_threshold,  # Above this = hot, below = cool
-            "hysteresis": 1.0,  # Hysteresis to prevent rapid switching
             "last_update": time.time()
         }
         
@@ -827,12 +826,6 @@ class AirconAgent(VirtualAgent):
                         # Update local state to reflect new threshold
                         self.local_state["temp_threshold"] = new_threshold
                         
-                        # Optionally update hysteresis
-                        if "hysteresis" in config:
-                            hysteresis = float(config["hysteresis"])
-                            if 0 <= hysteresis <= 5:
-                                self.temperature_threshold_config["hysteresis"] = hysteresis
-                        
                         success = True
                         message = f"Temperature threshold updated from {old_threshold}°C to {new_threshold}°C"
                         logger.info(f"[{self.agent_id}] {message}")
@@ -901,22 +894,11 @@ class AirconAgent(VirtualAgent):
                 logger.warning(f"[{self.agent_id}] Could not re-evaluate temperature status: {e}")
 
     def _classify_temperature_status(self, temp_value: float):
-        """Classify temperature as hot/cool using current threshold with hysteresis (simplified)."""
+        """Classify temperature as hot/cool using simple threshold comparison."""
         threshold = self.temperature_threshold_config["threshold"]
-        hysteresis = self.temperature_threshold_config.get("hysteresis", 1.0)
         
-        current_status = self.local_state.get("temperature_status", "unknown")
-        
-        # Use hysteresis to prevent rapid switching (similar to light logic)
-        if current_status == "cool":
-            # When currently cool, need higher threshold + hysteresis to become hot
-            new_status = "hot" if temp_value >= (threshold + hysteresis) else "cool"
-        elif current_status == "hot":
-            # When currently hot, need lower threshold - hysteresis to become cool
-            new_status = "cool" if temp_value <= (threshold - hysteresis) else "hot"
-        else:
-            # Unknown status, use simple threshold
-            new_status = "hot" if temp_value >= threshold else "cool"
+        # Simple threshold logic: above threshold = hot, below = cool
+        new_status = "hot" if temp_value >= threshold else "cool"
         
         if self.local_state.get("temperature_status") != new_status:
             self.local_state["temperature_status"] = new_status
