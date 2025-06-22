@@ -32,7 +32,7 @@ class LightHueAgent(VirtualAgent):
             }
         
         self.sensor_config = sensor_config
-        self.supported_sensor_types = ["infrared", "motion", "activity", "light"]
+        self.supported_sensor_types = ["infrared", "distance", "motion", "activity", "light"]
 
         # Light sensor configuration for bright/dark classification - NOW DYNAMIC
         self.light_threshold_config = {
@@ -126,6 +126,8 @@ class LightHueAgent(VirtualAgent):
         # Process every sensor update immediately - let context manager handle timing decisions
         if sensor_payload.sensor_type == "infrared":
             self._process_infrared_sensor(sensor_payload, sensor_id, current_time)
+        elif sensor_payload.sensor_type == "distance":
+            self._process_distance_sensor(sensor_payload, sensor_id, current_time)
         elif sensor_payload.sensor_type == "motion":
             self._process_motion_sensor(sensor_payload, sensor_id, current_time)
         elif sensor_payload.sensor_type == "activity":
@@ -150,11 +152,44 @@ class LightHueAgent(VirtualAgent):
                 logger.warning(f"[{self.agent_id}] No proximity_status in infrared sensor metadata")
                 return
                 
-            # Update global proximity status
+            # Update global proximity status (consider both infrared and distance sensors)
             proximity_detected = any(
                 sensor_info.get("metadata", {}).get("proximity_status") == "near"
                 for sensor_info in self.sensor_data.values()
-                if sensor_info.get("sensor_type") == "infrared"
+                if sensor_info.get("sensor_type") in ["infrared", "distance"]
+            )
+            new_proximity_status = "near" if proximity_detected else "far"
+            
+            if self.local_state.get("proximity_status") != new_proximity_status:
+                self.local_state["proximity_status"] = new_proximity_status
+                logger.info(f"[{self.agent_id}] Updated proximity_status to: {new_proximity_status}")
+
+            # Update activity_detected field for rules
+            self._update_activity_detected()
+
+            # Rate-limited state publication to context manager
+            self._schedule_transmission()
+    
+    def _process_distance_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
+        """Process distance sensor updates (same as infrared - uses proximity_status)."""
+        with self.state_lock:
+            # Update sensor data
+            self.sensor_data[sensor_id] = {
+                "sensor_type": sensor_payload.sensor_type,
+                "value": sensor_payload.value,
+                "unit": sensor_payload.unit,
+                "metadata": sensor_payload.metadata,
+            }
+
+            if not sensor_payload.metadata or "proximity_status" not in sensor_payload.metadata:
+                logger.warning(f"[{self.agent_id}] No proximity_status in distance sensor metadata")
+                return
+                
+            # Update global proximity status (distance sensors work same as infrared)
+            proximity_detected = any(
+                sensor_info.get("metadata", {}).get("proximity_status") == "near"
+                for sensor_info in self.sensor_data.values()
+                if sensor_info.get("sensor_type") in ["infrared", "distance"]  # Both sensor types
             )
             new_proximity_status = "near" if proximity_detected else "far"
             
