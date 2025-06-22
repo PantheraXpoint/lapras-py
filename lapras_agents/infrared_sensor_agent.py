@@ -192,7 +192,7 @@ class InfraredSensorAgent(SensorAgent):
                         logger.info(f"[{self.agent_id}] Setting SensorType to VOLTAGERATIO for channel {channel}")
                         sensor.setSensorType(VoltageRatioSensorType.SENSOR_TYPE_VOLTAGERATIO)
                         logger.info(f"[{self.agent_id}] Setting DataInterval to 200ms for channel {channel}")
-                        sensor.setDataInterval(200)
+                        sensor.setDataInterval(30)
 
                         self.ir_sensors[channel] = sensor
                         self.sensor_initialized[channel] = True
