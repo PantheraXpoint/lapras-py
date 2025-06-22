@@ -134,11 +134,23 @@ class ContextRuleManager:
             result5 = self.mqtt_client.subscribe(sensor_config_topic, qos=1)
             logger.info(f"[{self.service_id}] Subscribed to sensor config topic: {sensor_config_topic} (result: {result5})")
             
+            # Subscribe to threshold configuration commands from dashboard
+            # Topic: dashboard/threshold/command
+            threshold_config_topic = TopicManager.dashboard_threshold_command()
+            result6 = self.mqtt_client.subscribe(threshold_config_topic, qos=1)
+            logger.info(f"[{self.service_id}] Subscribed to threshold config topic: {threshold_config_topic} (result: {result6})")
+            
             # Subscribe to sensor configuration results from virtual agents
             # Topic pattern: agent/+/sensorConfig/result
             sensor_config_result_pattern = "agent/+/sensorConfig/result"
-            result6 = self.mqtt_client.subscribe(sensor_config_result_pattern, qos=1)
-            logger.info(f"[{self.service_id}] Subscribed to sensor config result pattern: {sensor_config_result_pattern} (result: {result6})")
+            result7 = self.mqtt_client.subscribe(sensor_config_result_pattern, qos=1)
+            logger.info(f"[{self.service_id}] Subscribed to sensor config result pattern: {sensor_config_result_pattern} (result: {result7})")
+            
+            # Subscribe to threshold configuration results from virtual agents
+            # Topic pattern: agent/+/thresholdConfig/result
+            threshold_config_result_pattern = "agent/+/thresholdConfig/result"
+            result8 = self.mqtt_client.subscribe(threshold_config_result_pattern, qos=1)
+            logger.info(f"[{self.service_id}] Subscribed to threshold config result pattern: {threshold_config_result_pattern} (result: {result8})")
         else:
             logger.error(f"[{self.service_id}] Failed to connect to MQTT broker. Result code: {rc}")
 
@@ -186,6 +198,16 @@ class ContextRuleManager:
                     logger.error(f"[{self.service_id}] ERROR in sensor configuration command: {sensor_error}", exc_info=True)
                 return
             
+            # Check if it's a dashboard threshold configuration command
+            if msg.topic == TopicManager.dashboard_threshold_command():
+                logger.info(f"[{self.service_id}] DEBUG: Processing threshold configuration command")
+                try:
+                    self._handle_threshold_config_command(msg.payload.decode())
+                    logger.info(f"[{self.service_id}] DEBUG: Threshold configuration command processed successfully")
+                except Exception as threshold_error:
+                    logger.error(f"[{self.service_id}] ERROR in threshold configuration command: {threshold_error}", exc_info=True)
+                return
+            
             # Check if it's a sensor configuration result from virtual agent
             if msg.topic.startswith("agent/") and msg.topic.endswith("/sensorConfig/result"):
                 logger.info(f"[{self.service_id}] DEBUG: Processing sensor configuration result")
@@ -194,6 +216,16 @@ class ContextRuleManager:
                     logger.info(f"[{self.service_id}] DEBUG: Sensor configuration result processed successfully")
                 except Exception as result_error:
                     logger.error(f"[{self.service_id}] ERROR in sensor configuration result: {result_error}", exc_info=True)
+                return
+            
+            # Check if it's a threshold configuration result from virtual agent
+            if msg.topic.startswith("agent/") and msg.topic.endswith("/thresholdConfig/result"):
+                logger.info(f"[{self.service_id}] DEBUG: Processing threshold configuration result")
+                try:
+                    self._handle_threshold_config_result(msg.payload.decode())
+                    logger.info(f"[{self.service_id}] DEBUG: Threshold configuration result processed successfully")
+                except Exception as result_error:
+                    logger.error(f"[{self.service_id}] ERROR in threshold configuration result: {result_error}", exc_info=True)
                 return
             
             # For other message types, try to deserialize as Event
@@ -1285,33 +1317,30 @@ class ContextRuleManager:
             event = MQTTMessage.deserialize(message_payload)
             
             if event.event.type != "sensorConfigResult":
-                logger.error(f"[{self.service_id}] Expected sensorConfigResult event type, got: {event.event.type}")
+                logger.warning(f"[{self.service_id}] Unexpected event type in sensor config result: {event.event.type}")
                 return
             
-            logger.info(f"[{self.service_id}] Received sensor configuration result: {event.event.id}")
+            payload = event.payload
+            command_id = payload.get("command_id")
+            success = payload.get("success")
+            message = payload.get("message")
+            agent_id = payload.get("agent_id", "")
+            action = payload.get("action")
+            current_sensors = payload.get("current_sensors", [])
             
-            # Extract result details from payload
-            agent_id = event.source.entityId
-            command_id = event.payload.get('command_id')
-            success = event.payload.get('success')
-            message = event.payload.get('message')
-            action = event.payload.get('action')
-            current_sensors = event.payload.get('current_sensors', [])
+            logger.info(f"[{self.service_id}] Received sensor config result from agent '{agent_id}': {success} - {message}")
             
-            logger.info(f"[{self.service_id}] Agent {agent_id} sensor config result: {success} - {message}")
-            
-            # Forward result to dashboard
+            # Forward the result back to the dashboard
             self._publish_sensor_config_command_result(command_id, success, message, agent_id, action, current_sensors)
             
         except Exception as e:
-            logger.error(f"[{self.service_id}] Error processing sensor config result: {e}", exc_info=True)
+            logger.error(f"[{self.service_id}] Error handling sensor config result: {e}", exc_info=True)
 
     def _publish_sensor_config_command_result(self, command_id: str, success: bool, message: str, 
                                             agent_id: Optional[str], action: Optional[str] = None, 
                                             current_sensors: Optional[List[str]] = None):
-        """Publish sensor configuration command result back to dashboard via MQTT using Event structure."""
+        """Publish sensor configuration command result to dashboard."""
         try:
-            # Create Event structure for command result
             result_event = EventFactory.create_sensor_config_command_result_event(
                 command_id=command_id,
                 success=success,
@@ -1322,13 +1351,136 @@ class ContextRuleManager:
             )
             
             result_topic = TopicManager.dashboard_sensor_config_result()
-            result_message = MQTTMessage.serialize(result_event)
-            self.mqtt_client.publish(result_topic, result_message, qos=1)
+            message_str = MQTTMessage.serialize(result_event)
+            self.mqtt_client.publish(result_topic, message_str, qos=1)
             
-            logger.info(f"[{self.service_id}] Published sensor config command result: {command_id} - {success}")
+            logger.info(f"[{self.service_id}] Published sensor config result to dashboard: {result_topic}")
             
         except Exception as e:
-            logger.error(f"[{self.service_id}] Error publishing sensor config command result: {e}")
+            logger.error(f"[{self.service_id}] Error publishing sensor config result: {e}")
+
+    def _handle_threshold_config_command(self, message_payload: str):
+        """Handle threshold configuration command from dashboard."""
+        try:
+            # Parse the dashboard threshold command
+            command_data = json.loads(message_payload)
+            logger.debug(f"[{self.service_id}] Threshold config command data: {command_data}")
+            
+            # Extract command information
+            event_info = command_data.get("event", {})
+            payload = command_data.get("payload", {})
+            command_id = event_info.get("id")
+            
+            agent_id = payload.get("agent_id")
+            threshold_type = payload.get("threshold_type")
+            config = payload.get("config", {})
+            
+            if not all([command_id, agent_id, threshold_type]):
+                logger.error(f"[{self.service_id}] Missing required fields in threshold config command")
+                self._publish_threshold_config_command_result(
+                    command_id or "unknown",
+                    False,
+                    "Missing required fields: command_id, agent_id, or threshold_type",
+                    agent_id,
+                    threshold_type,
+                    {}
+                )
+                return
+            
+            # Create threshold configuration event for the target agent
+            threshold_event = EventFactory.create_threshold_config_event(
+                agent_id=agent_id,
+                threshold_type=threshold_type,
+                config=config,
+                source_entity_id="ContextRuleManager"
+            )
+            
+            # Set the command ID from dashboard command
+            threshold_event.event.id = command_id
+            
+            # Send to the specific agent
+            agent_threshold_topic = TopicManager.threshold_config_command(agent_id)
+            threshold_message = MQTTMessage.serialize(threshold_event)
+            
+            self.mqtt_client.publish(agent_threshold_topic, threshold_message, qos=1)
+            
+            logger.info(f"[{self.service_id}] Forwarded threshold config command to agent '{agent_id}' on topic: {agent_threshold_topic}")
+            logger.debug(f"[{self.service_id}] Threshold config details: type={threshold_type}, config={config}")
+            
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error handling threshold config command: {e}", exc_info=True)
+            try:
+                # Try to extract command_id for error response
+                command_data = json.loads(message_payload)
+                command_id = command_data.get("event", {}).get("id", "unknown")
+                agent_id = command_data.get("payload", {}).get("agent_id", "unknown")
+                threshold_type = command_data.get("payload", {}).get("threshold_type", "unknown")
+                
+                self._publish_threshold_config_command_result(
+                    command_id,
+                    False,
+                    f"Error processing threshold config command: {str(e)}",
+                    agent_id,
+                    threshold_type,
+                    {}
+                )
+            except:
+                logger.error(f"[{self.service_id}] Could not send error response for threshold config command")
+
+    def _handle_threshold_config_result(self, message_payload: str):
+        """Handle threshold configuration result from virtual agent."""
+        try:
+            # Parse the agent's threshold config result
+            event = MQTTMessage.deserialize(message_payload)
+            
+            if event.event.type != "thresholdConfigResult":
+                logger.warning(f"[{self.service_id}] Unexpected event type in threshold config result: {event.event.type}")
+                return
+            
+            payload = event.payload
+            command_id = payload.get("command_id")
+            success = payload.get("success", False)
+            message = payload.get("message", "")
+            agent_id = payload.get("agent_id", "")
+            threshold_type = payload.get("threshold_type", "")
+            current_config = payload.get("current_config", {})
+            
+            logger.info(f"[{self.service_id}] Received threshold config result from agent '{agent_id}': {success} - {message}")
+            
+            # Forward the result back to the dashboard
+            self._publish_threshold_config_command_result(
+                command_id,
+                success,
+                message,
+                agent_id,
+                threshold_type,
+                current_config
+            )
+            
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error handling threshold config result: {e}", exc_info=True)
+
+    def _publish_threshold_config_command_result(self, command_id: str, success: bool, message: str, 
+                                               agent_id: str, threshold_type: str, current_config: Dict[str, Any]):
+        """Publish threshold configuration command result to dashboard."""
+        try:
+            result_event = EventFactory.create_dashboard_threshold_command_result_event(
+                command_id=command_id,
+                success=success,
+                message=message,
+                agent_id=agent_id,
+                threshold_type=threshold_type,
+                current_config=current_config
+            )
+            
+            result_topic = TopicManager.dashboard_threshold_result()
+            message_str = MQTTMessage.serialize(result_event)
+            self.mqtt_client.publish(result_topic, message_str, qos=1)
+            
+            logger.info(f"[{self.service_id}] Published threshold config result to dashboard: {result_topic}")
+            
+        except Exception as e:
+            logger.error(f"[{self.service_id}] Error publishing threshold config result: {e}")
 
     def test_extended_window_timing(self, agent_id: str = "test_agent") -> None:
         """Manual test method to verify extended window timing logic."""
