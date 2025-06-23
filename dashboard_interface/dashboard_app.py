@@ -103,35 +103,32 @@ def main():
 
     with col2:
         st.write("")
-        st.write("Service Adjustments:")
+        st.subheader("Service Adjustments:")
+        value = st.text_input("Adjust Sensor Threshold:", key="value_adjustment", value="", type="default")
+        service_id = st.text_input("Which service to modify?", key="sensor_id_addition", value="", type="default")
         update_req = st.button("Update Rule", key="update_rules", use_container_width=True)
-    rule_adjust_text =  col2.empty()
-    rule_adjust_container = col2.empty()
     if update_req:
-        rule_adjust_text.text = "Adjust temperature for AC automation (°C):"
-        temperature = rule_adjust_container.text_input("Temperature", key="temperature_adjustment", value="35.0", type="default")
-        if temperature:
             try:
-                temperature = float(temperature)
-                if temperature < 0 or temperature > 50:
-                    st.error("Please enter a valid temperature between 0 and 50 °C.")
+                value = float(value)
+                if not value:
+                    st.error("Please enter a valid number without unit.")
                 else:
+                    # TODO Quang
 
-                    st.success(f"AC automation rule updated to {temperature} °C.")
+                    st.success(f"Automation rule updated to {value}.")
             except ValueError:
                 st.error("Invalid input. Please enter a numeric value for temperature.")
 
     with col2:
         st.write("")
         add_req = st.button("Add Sensor", key="add_sensor", use_container_width=True)
-    rule_adjust_text =  col2.empty()
-    rule_adjust_container = col2.empty()
     if add_req:
-        rule_adjust_text.text = "Which service to modify?"
-        service_id = rule_adjust_container.text_input("Service ID", key="sensor_id_addition", value="", type="default")
         if service_id and sensor_id:
+            # TODO Quang
 
             st.success(f"Sensor {sensor_id} added successfully to {service_id}.")
+        else:
+            st.error("Please provide both Service ID and Sensor ID to add a sensor.")
 
     with col2:
         st.write("")
@@ -139,14 +136,14 @@ def main():
 
     last_svg = ""
     if clicked_sensor:
-        #st.write(f"Clicked sensor ID: {clicked_sensor}")
+        st.write(f"Chosen sensor: {clicked_sensor}")
         # Querying the sensor data from database
         sensor_data = query_event_db(db, clicked_sensor)
         if sensor_data:
             # Convert timestamp to datetime for plotting
             df = pd.DataFrame([
                 {
-                    'timestamp': datetime.fromtimestamp(sensor_value['timestamp']),
+                    'timestamp': sensor_value['timestamp'],
                     'value': sensor_value['value']
                 }
                 for sensor_value in sensor_data
@@ -154,7 +151,7 @@ def main():
             # Plot the data using Streamlit's line chart
             st.line_chart(df.set_index('timestamp')['value'])
         else:
-            st.info("No data found for this sensor")
+            st.info("No data found for this sensor!")
     light_switch = light_btn.button("Light Switch", key="light_switch", use_container_width=True)
     ac_switch = ac_btn.button("AC Switch", key="ac_switch", use_container_width=True)
 

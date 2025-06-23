@@ -7,10 +7,10 @@ class MeetingRoomDesign:
         'door_01': (8, 9),  # Located at the center of the room entrance
         # Light, Infrared (left center vertical line)
         'light_1': (0, 4),
-        'infrared_5': (0, 6),
-        'infrared_6': (0, 5),
-        'infrared_7': (0, 3),
-        'infrared_8': (0, 2),
+        'distance_1': (0, 6),
+        'distance_2': (0, 5),
+        'distance_3': (0, 3),
+        'distance_4': (0, 2),
         # Chairs (A row: left, B row: right, rows 2~6, 7B has same x as AC)
         'activity_s2a': (2, 2),
         'activity_s3a': (2, 3),
@@ -122,6 +122,10 @@ class MeetingRoomDesign:
                 label = 'Mot'
                 default_color = self.motion_color
                 sensor_type = 'motion'
+            elif eid.startswith('distance'):
+                label = 'Dist'
+                default_color = self.infrared_color
+                sensor_type = 'infrared'
             elif eid.startswith('infrared'):
                 label = 'Ir'
                 default_color = self.infrared_color
@@ -211,6 +215,9 @@ class MeetingRoomDesign:
             elif eid.startswith('motion'):
                 svg.append(f'<rect x="{x-18}" y="{y-18}" width="36" height="36" rx="8" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
                 svg.append(f'<text x="{x}" y="{y+5}" font-size="14" text-anchor="middle" fill="#222">{label}</text>')
+            elif eid.startswith('distance'):
+                svg.append( f'<ellipse cx="{x}" cy="{y}" rx="20" ry="14" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
+                svg.append(f'<text x="{x}" y="{y + 5}" font-size="14" text-anchor="middle" fill="#222">{label}</text>')
             elif eid.startswith('infrared'):
                 svg.append(f'<ellipse cx="{x}" cy="{y}" rx="20" ry="14" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
                 svg.append(f'<text x="{x}" y="{y+5}" font-size="14" text-anchor="middle" fill="#222">{label}</text>')

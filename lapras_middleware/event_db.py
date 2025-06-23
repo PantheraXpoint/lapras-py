@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
@@ -74,10 +75,11 @@ if __name__ == "__main__":
         # Keep the script running to maintain the MQTT connection and store Data in the database
         data = client.get_all_sensors()
         for sensor_name, sensor_data in data.items():
-            # Check if the sensor data has been updated since the last timestamp
+            # Check if the sensor data has been updated since the last timestamp in korean timezone
             last_update = sensor_data.get("last_update")
             if not last_update:
                 continue
+            last_update = datetime.fromtimestamp(last_update, tz=timezone.utc).astimezone(timezone(timedelta(hours=9)))
             if sensor_name in last_timestamps and last_update <= last_timestamps[sensor_name]:
                     continue
             last_timestamps[sensor_name] = last_update
