@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class AirconAgent(VirtualAgent):
     def __init__(self, agent_id: str = "aircon", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, 
                  sensor_config: dict = None, transmission_interval: float = 0.5,
-                 temp_threshold: float = 24.0):
+                 temp_threshold: float = 20.0):
         
         # Initialize attributes that might be accessed by perception thread first
         self.transmission_interval = transmission_interval  # seconds between transmissions

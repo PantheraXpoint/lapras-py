@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class LightHueAgent(VirtualAgent):
     def __init__(self, agent_id: str = "hue_light", mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883, 
                  sensor_config: dict = None, transmission_interval: float = 0.1, 
-                 light_threshold: float = 50.0):
+                 light_threshold: float = 4000.0):
         super().__init__(agent_id, "hue_light", mqtt_broker, mqtt_port)
         
         logger.info(f"[{self.agent_id}] LightHueAgent initialized")
