@@ -55,14 +55,13 @@ class AirconAgent(VirtualAgent):
         # Initialize local state with known state
         self.local_state.update({
             "power": "off",
-            "temperature": 25,  # Default temperature setting
-            "mode": "auto",     # auto, cool, heat, fan
             "proximity_status": "unknown",
             "motion_status": "unknown", 
             "activity_status": "unknown",
             "activity_detected": False,
             "temperature_status": "unknown",  # hot, cool (simplified)
             "temp_threshold": self.temperature_threshold_config["threshold"],  # Expose current threshold
+            "current_temperature": None,  # Will be updated by temperature sensor
         })
         
         self.sensor_data = defaultdict(dict)  # Store sensor data with sensor_id as key
@@ -357,9 +356,13 @@ class AirconAgent(VirtualAgent):
                 "metadata": sensor_payload.metadata,
             }
 
-            # Classify temperature using dynamic thresholds
+            # Update current temperature in local state from sensor data
             try:
                 temp_value = float(sensor_payload.value)
+                self.local_state["current_temperature"] = temp_value
+                logger.info(f"[{self.agent_id}] Updated current_temperature from sensor: {temp_value}°C")
+                
+                # Classify temperature using dynamic thresholds
                 self._classify_temperature_status(temp_value)
                 
             except (ValueError, TypeError) as e:
@@ -539,60 +542,6 @@ class AirconAgent(VirtualAgent):
                 "message": f"Error turning off aircons: {str(e)}"
             }
     
-    def __temp_up_aircon(self):
-        """Increase temperature on both air conditioners using IR controller commands."""
-        try:
-            result = self._execute_ir_command("temp_up")
-            new_temp = self.local_state.get("temperature", 25) + 1
-            
-            if result["success"]:
-                return {
-                    "success": True,
-                    "message": f"Increased temperature on all aircons via IR controllers: {result['message']}",
-                    "new_state": {
-                        "temperature": new_temp
-                    }
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": f"Failed to increase temperature on some/all aircons: {result['message']}"
-                }
-                
-        except Exception as e:
-            logger.error(f"[{self.agent_id}] Error increasing temperature: {e}")
-            return {
-                "success": False,
-                "message": f"Error increasing temperature: {str(e)}"
-            }
-    
-    def __temp_down_aircon(self):
-        """Decrease temperature on both air conditioners using IR controller commands."""
-        try:
-            result = self._execute_ir_command("temp_down")
-            new_temp = self.local_state.get("temperature", 25) - 1
-            
-            if result["success"]:
-                return {
-                    "success": True,
-                    "message": f"Decreased temperature on all aircons via IR controllers: {result['message']}",
-                    "new_state": {
-                        "temperature": new_temp
-                    }
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": f"Failed to decrease temperature on some/all aircons: {result['message']}"
-                }
-                
-        except Exception as e:
-            logger.error(f"[{self.agent_id}] Error decreasing temperature: {e}")
-            return {
-                "success": False,
-                "message": f"Error decreasing temperature: {str(e)}"
-            }
-
     def execute_action(self, action_payload: ActionPayload) -> dict:
         """Execute aircon control actions with fast response (no verification)."""
         logger.info(f"[{self.agent_id}] Executing action: {action_payload.actionName}")
@@ -644,74 +593,6 @@ class AirconAgent(VirtualAgent):
                 # Always trigger state publication
                 self._trigger_state_publication()
                 
-            elif action_payload.actionName == "temp_up":
-                with self.state_lock:
-                    old_temp = self.local_state.get("temperature", 25)
-                    self.local_state["temperature"] = old_temp + 1
-                    new_state = self.local_state.copy()
-                    result = self.__temp_up_aircon()
-                
-                logger.info(f"[{self.agent_id}] Aircon temperature increased (commanded by context manager)")
-                # Trigger state publication since local_state changed
-                self._trigger_state_publication()
-                
-            elif action_payload.actionName == "temp_down":
-                with self.state_lock:
-                    old_temp = self.local_state.get("temperature", 25)
-                    self.local_state["temperature"] = old_temp - 1
-                    new_state = self.local_state.copy()
-                    result = self.__temp_down_aircon()
-                
-                logger.info(f"[{self.agent_id}] Aircon temperature decreased (commanded by context manager)")
-                # Trigger state publication since local_state changed
-                self._trigger_state_publication()
-                
-            elif action_payload.actionName == "set_temperature":
-                if action_payload.parameters and "temperature" in action_payload.parameters:
-                    temp = action_payload.parameters["temperature"]
-                    with self.state_lock:
-                        self.local_state["temperature"] = temp
-                        new_state = self.local_state.copy()
-                    result = {
-                        "success": True,
-                        "message": f"Temperature set to {temp}°C",
-                        "new_state": {"temperature": temp}
-                    }
-                    logger.info(f"[{self.agent_id}] Temperature set to {temp}°C")
-                    # Trigger state publication since local_state changed
-                    self._trigger_state_publication()
-                else:
-                    result = {
-                        "success": False,
-                        "message": "Temperature parameter missing"
-                    }
-                    
-            elif action_payload.actionName == "set_mode":
-                if action_payload.parameters and "mode" in action_payload.parameters:
-                    mode = action_payload.parameters["mode"]
-                    if mode in ["auto", "cool", "heat", "fan"]:
-                        with self.state_lock:
-                            self.local_state["mode"] = mode
-                            new_state = self.local_state.copy()
-                        result = {
-                            "success": True,
-                            "message": f"Mode set to {mode}",
-                            "new_state": {"mode": mode}
-                        }
-                        logger.info(f"[{self.agent_id}] Mode set to {mode}")
-                        # Trigger state publication since local_state changed
-                        self._trigger_state_publication()
-                    else:
-                        result = {
-                            "success": False,
-                            "message": f"Invalid mode: {mode}. Valid modes: auto, cool, heat, fan"
-                        }
-                else:
-                    result = {
-                        "success": False,
-                        "message": "Mode parameter missing"
-                    }
-                    
             else:
                 result = {
                     "success": False,
@@ -926,3 +807,5 @@ class AirconAgent(VirtualAgent):
         # Add threshold subscription after MQTT is connected
         if rc == 0:
             self._setup_threshold_subscription()
+
+
