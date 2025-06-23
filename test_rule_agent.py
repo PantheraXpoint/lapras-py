@@ -46,6 +46,8 @@ class RuleAgentTester:
             "aircon_activity_only": "Aircon - Activity sensor only",
             "aircon_ir_only": "Aircon - IR proximity sensor only",
             "aircon_all_sensors": "Aircon - All sensors (OR logic)",
+            "aircon_door_only": "Aircon - Door sensor only",
+            "aircon_door_sensors": "Aircon - Door + IR sensors",
             "both_devices_motion": "Both devices - Motion only",
             "both_devices_all": "Both devices - All sensors"
         }
@@ -65,7 +67,8 @@ class RuleAgentTester:
             "lapras_middleware/rules/aircon_ir_motion.ttl",
             "lapras_middleware/rules/aircon_activity_motion.ttl",
             "lapras_middleware/rules/aircon_ir_activity.ttl",
-            "lapras_middleware/rules/aircon_ir_acitivity_motion.ttl"
+            "lapras_middleware/rules/aircon_ir_acitivity_motion.ttl",
+            "lapras_middleware/rules/aircon_door.ttl"
         ]
         
         print(f"🤖 Rule Agent Tester initialized")

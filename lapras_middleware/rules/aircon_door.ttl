@@ -1,0 +1,33 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Aircon Door Rules ---
+# Rule: Turn OFF aircon when door is OPEN
+lapras:AirconOffWhenDoorOpenRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:DoorOpenCondition ;
+    lapras:hasAction lapras:SetAirconPowerOffDoor .
+
+lapras:DoorOpenCondition
+    lapras:hasSensor "door_status" ; 
+    lapras:hasOperator lapras:equals ; 
+    lapras:hasValue "open" .
+
+lapras:SetAirconPowerOffDoor 
+    lapras:hasStateUpdate '{"power": "off"}' .
+
+# Rule: Turn ON aircon when door is CLOSED
+lapras:AirconOnWhenDoorClosedRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:DoorClosedCondition ;
+    lapras:hasAction lapras:SetAirconPowerOnDoor .
+
+lapras:DoorClosedCondition
+    lapras:hasSensor "door_status" ; 
+    lapras:hasOperator lapras:equals ; 
+    lapras:hasValue "closed" .
+
+lapras:SetAirconPowerOnDoor 
+    lapras:hasStateUpdate '{"power": "on"}' . 

@@ -38,6 +38,7 @@ class RuleAgent:
             "hue_motion_only", "hue_activity_only", "hue_ir_only", "hue_ir_motion",
             "hue_activity_motion", "hue_ir_activity", "hue_all_sensors",
             "aircon_motion_only", "aircon_activity_only", "aircon_ir_only", "aircon_all_sensors",
+            "aircon_door_only", "aircon_door_sensors", 
             "both_devices_motion", "both_devices_all"
         }
         

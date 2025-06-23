@@ -48,6 +48,8 @@ class ContextRuleManager:
             "aircon_activity_only": ["lapras_middleware/rules/aircon_activity.ttl"],
             "aircon_ir_only": ["lapras_middleware/rules/aircon_ir.ttl"],
             "aircon_all_sensors": ["lapras_middleware/rules/aircon_ir_acitivity_motion.ttl"],
+            "aircon_door_only": ["lapras_middleware/rules/aircon_door.ttl"],
+            "aircon_door_sensors": ["lapras_middleware/rules/aircon_door.ttl", "lapras_middleware/rules/aircon_ir.ttl"],
             "both_devices_motion": [
                 "lapras_middleware/rules/hue_motion.ttl",
                 "lapras_middleware/rules/aircon_motion.ttl"
@@ -525,9 +527,12 @@ class ContextRuleManager:
         
         Logic:
         - OFF → ON: Start extended window, return "on"
-        - During extended window:
+        - During normal extended window (60s):
           - Rule says "on": Extend window, return "on" 
           - Rule says "off": Continue countdown, return "on"
+        - During fast response window (5s):
+          - Rule says "on": Convert to normal 60s window, return "on"
+          - Rule says "off": Allow immediate OFF, return "off"
         - After window expires: Allow "off", return "off"
         """
         current_time = time.time()
@@ -542,7 +547,8 @@ class ContextRuleManager:
                 self.extended_window_agents[agent_id] = {
                     "start_time": current_time,
                     "duration": self.EXTENDED_WINDOW_DURATION,
-                    "last_extend_time": current_time
+                    "last_extend_time": current_time,
+                    "is_fast_response": False
                 }
                 logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Started {self.EXTENDED_WINDOW_DURATION}s window for '{agent_id}'")
                 return "on"
@@ -556,9 +562,10 @@ class ContextRuleManager:
             window_start = window_info["start_time"]
             last_extend = window_info["last_extend_time"]
             current_duration = window_info.get("duration", self.EXTENDED_WINDOW_DURATION)
+            is_fast_response = window_info.get("is_fast_response", False)
             time_since_last_extend = current_time - last_extend
             
-            logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Active for '{agent_id}' - time since last extend: {time_since_last_extend:.1f}s / {current_duration}s")
+            logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Active for '{agent_id}' - time since last extend: {time_since_last_extend:.1f}s / {current_duration}s (fast_response: {is_fast_response})")
             
             # Window expired?
             if time_since_last_extend >= current_duration:
@@ -567,14 +574,32 @@ class ContextRuleManager:
                 logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: EXPIRED for '{agent_id}' after {time_since_last_extend:.1f}s - allowing raw decision: {raw_rule_decision}")
                 return raw_rule_decision
             
-            # Case 4: Active window, rule says "on" - extend window
+            # Case 4: Fast response window (5s) - allow immediate rule evaluation
+            if is_fast_response:
+                if raw_rule_decision == "on":
+                    # Convert to normal 60s extended window
+                    self.extended_window_agents[agent_id] = {
+                        "start_time": current_time,
+                        "duration": self.EXTENDED_WINDOW_DURATION,
+                        "last_extend_time": current_time,
+                        "is_fast_response": False
+                    }
+                    logger.info(f"[{self.service_id}] 🕰️  FAST RESPONSE: Rule says 'on' for '{agent_id}' - converting to {self.EXTENDED_WINDOW_DURATION}s extended window")
+                    return "on"
+                else:
+                    # Allow immediate OFF during fast response
+                    del self.extended_window_agents[agent_id]
+                    logger.info(f"[{self.service_id}] 🕰️  FAST RESPONSE: Rule says 'off' for '{agent_id}' - allowing immediate OFF")
+                    return "off"
+            
+            # Case 5: Normal extended window, rule says "on" - extend window
             if raw_rule_decision == "on":
                 self.extended_window_agents[agent_id]["last_extend_time"] = current_time
                 remaining_time = current_duration - time_since_last_extend
                 logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Extended for '{agent_id}' (reset to {current_duration}s)")
                 return "on"
             
-            # Case 5: Active window, rule says "off" - continue countdown, stay on
+            # Case 6: Normal extended window, rule says "off" - continue countdown, stay on
             else:
                 remaining_time = current_duration - time_since_last_extend
                 logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Rule says 'off' for '{agent_id}', but in window ({remaining_time:.1f}s remaining) - staying on")
@@ -664,6 +689,51 @@ class ContextRuleManager:
                 cleared_agents = list(self.extended_window_agents.keys())
                 self.extended_window_agents.clear()
                 logger.info(f"[{self.service_id}] Cleared extended windows for {len(cleared_agents)} agents due to duration change")
+
+    def _set_fast_response_window(self, agent_id: str, reason: str = "configuration change") -> None:
+        """Set a 5-second extended window for faster response to configuration changes."""
+        with self.extended_window_lock:
+            current_time = time.time()
+            if agent_id in self.extended_window_agents:
+                # Override existing window - set to 5 seconds
+                self.extended_window_agents[agent_id]["duration"] = 5.0
+                self.extended_window_agents[agent_id]["last_extend_time"] = current_time
+                self.extended_window_agents[agent_id]["is_fast_response"] = True
+                logger.info(f"[{self.service_id}] 🕰️ {reason.upper()}: Set window to 5 seconds for '{agent_id}'")
+            else:
+                # Create new 5-second window
+                self.extended_window_agents[agent_id] = {
+                    "start_time": current_time,
+                    "duration": 5.0,
+                    "last_extend_time": current_time,
+                    "is_fast_response": True
+                }
+                logger.info(f"[{self.service_id}] 🕰️ {reason.upper()}: Created 5-second window for '{agent_id}'")
+
+    def _set_fast_response_window_for_all_agents(self, reason: str = "rule change") -> None:
+        """Set 5-second extended windows for all known agents after rule changes."""
+        with self.extended_window_lock:
+            current_time = time.time()
+            affected_agents = []
+            
+            for agent_id in self.known_agents:
+                if agent_id in self.extended_window_agents:
+                    # Override existing window - set to 5 seconds
+                    self.extended_window_agents[agent_id]["duration"] = 5.0
+                    self.extended_window_agents[agent_id]["last_extend_time"] = current_time
+                    self.extended_window_agents[agent_id]["is_fast_response"] = True
+                else:
+                    # Create new 5-second window
+                    self.extended_window_agents[agent_id] = {
+                        "start_time": current_time,
+                        "duration": 5.0,
+                        "last_extend_time": current_time,
+                        "is_fast_response": True
+                    }
+                affected_agents.append(agent_id)
+            
+            if affected_agents:
+                logger.info(f"[{self.service_id}] 🕰️ {reason.upper()}: Set 5-second windows for {len(affected_agents)} agents: {affected_agents}")
 
     def get_extended_window_status(self, agent_id: str) -> Optional[Dict[str, Any]]:
         """Get the current extended window status for debugging purposes."""
@@ -995,6 +1065,10 @@ class ContextRuleManager:
                     for rule_file in rule_files:
                         self.load_rules(rule_file)
                         loaded_files.append(rule_file)
+                    
+                    # NEW: Set 5-second windows for all agents after loading new rules
+                    self._set_fast_response_window_for_all_agents("rule load")
+                    
                     success = True
                     message = f"Successfully loaded {len(loaded_files)} rule files: {loaded_files}"
                 except Exception as e:
@@ -1012,6 +1086,10 @@ class ContextRuleManager:
                     for rule_file in rule_files:
                         self.load_rules(rule_file)
                         loaded_files.append(rule_file)
+                    
+                    # NEW: Set 5-second windows for all agents after reloading rules
+                    self._set_fast_response_window_for_all_agents("rule reload")
+                    
                     success = True
                     message = f"Successfully reloaded {len(loaded_files)} rule files: {loaded_files}"
                 except Exception as e:
@@ -1023,7 +1101,7 @@ class ContextRuleManager:
                     old_files = list(self.loaded_rule_files)
                     self.clear_rules()
                     
-                    # Clear extended window state when switching rules
+                    # Clear extended window state when switching rules (will be recreated below)
                     with self.extended_window_lock:
                         self.extended_window_agents.clear()
                     
@@ -1032,6 +1110,10 @@ class ContextRuleManager:
                     for rule_file in rule_files:
                         self.load_rules(rule_file)
                         loaded_files.append(rule_file)
+                    
+                    # NEW: Set 5-second windows for all agents after switching rules
+                    self._set_fast_response_window_for_all_agents("rule switch")
+                    
                     success = True
                     message = f"Successfully switched from {old_files} to {loaded_files}"
                     logger.info(f"[{self.service_id}] RULE SWITCH: {old_files} → {loaded_files}")
@@ -1085,6 +1167,10 @@ class ContextRuleManager:
                         for rule_file in preset_files:
                             self.load_rules(rule_file)
                             loaded_files.append(rule_file)
+                        
+                        # NEW: Set 5-second windows for all agents after switching presets
+                        self._set_fast_response_window_for_all_agents("preset switch")
+                        
                         success = True
                         message = f"Successfully switched to preset '{preset_name}': {loaded_files}"
                         logger.info(f"[{self.service_id}] PRESET SWITCH: {old_files} → {preset_name} ({loaded_files})")
@@ -1278,6 +1364,9 @@ class ContextRuleManager:
                 self._publish_sensor_config_command_result(command_id, False, f"Agent {target_agent_id} not found", target_agent_id)
                 return
             
+            # NEW: Set extended window to 5 seconds for faster sensor config response
+            self._set_fast_response_window(target_agent_id, "sensor config")
+            
             # Forward the sensor config command to the target virtual agent
             target_topic = TopicManager.sensor_config_command(target_agent_id)
             forward_message = MQTTMessage.serialize(event)
@@ -1376,21 +1465,7 @@ class ContextRuleManager:
                 return
             
             # NEW: Set extended window to 5 seconds for faster threshold response
-            with self.extended_window_lock:
-                current_time = time.time()
-                if agent_id in self.extended_window_agents:
-                    # Override existing window - set to 5 seconds
-                    self.extended_window_agents[agent_id]["duration"] = 5.0
-                    self.extended_window_agents[agent_id]["last_extend_time"] = current_time
-                    logger.info(f"[{self.service_id}] 🕰️ THRESHOLD CONFIG: Set window to 5 seconds for '{agent_id}'")
-                else:
-                    # Create new 5-second window
-                    self.extended_window_agents[agent_id] = {
-                        "start_time": current_time,
-                        "duration": 5.0,
-                        "last_extend_time": current_time
-                    }
-                    logger.info(f"[{self.service_id}] 🕰️ THRESHOLD CONFIG: Created 5-second window for '{agent_id}'")
+            self._set_fast_response_window(agent_id, "threshold config")
             
             # Create threshold configuration event for the target agent
             threshold_event = EventFactory.create_threshold_config_event(
