@@ -46,7 +46,12 @@ lapras:HueLightOffWhenInactiveAndNoMotionRule a lapras:Rule ;
     lapras:hasCondition lapras:IsNoMotionCondition ;
     lapras:hasAction lapras:SetHueLightPowerOff .
 
-
+# Turn OFF light when light status is bright
+lapras:HueLightOffWhenBrightRule a lapras:Rule ;
+    lapras:hasAgent "hue_light" ;
+    lapras:hasCondition lapras:IsLightOnCondition ;
+    lapras:hasCondition lapras:IsBrightCondition ;
+    lapras:hasAction lapras:SetHueLightPowerOff .
 
 lapras:IsInactiveCondition
     lapras:hasSensor "activity_status" ;

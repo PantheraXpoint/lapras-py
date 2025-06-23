@@ -28,6 +28,12 @@ lapras:AirconOffWhenFarAndNoMotionRule a lapras:Rule ;
     lapras:hasCondition lapras:IsNoMotionCondition ;
     lapras:hasAction lapras:SetAirconPowerOff .
 
+# Turn OFF aircon when temperature is cool
+lapras:AirconOffWhenCoolRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsTemperatureCoolCondition ;
+    lapras:hasAction lapras:SetAirconPowerOff .
+
 # Conditions
 lapras:IsNearCondition
     lapras:hasSensor "proximity_status" ;

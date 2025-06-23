@@ -12,10 +12,16 @@ lapras:AirconCoolOnWhenActiveAndHotRule a lapras:Rule ;
     lapras:hasCondition lapras:IsTemperatureHotCondition ;
     lapras:hasAction lapras:SetAirconCoolOn .
 
-# Turn OFF aircon when no activity is detected (regardless of temperature)
+# Turn OFF aircon when no activity is detected
 lapras:AirconOffWhenInactiveRule a lapras:Rule ;
     lapras:hasAgent "aircon" ;
     lapras:hasCondition lapras:IsInactiveCondition ;
+    lapras:hasAction lapras:SetAirconPowerOff .
+
+# Turn OFF aircon when temperature is cool
+lapras:AirconOffWhenCoolRule a lapras:Rule ;
+    lapras:hasAgent "aircon" ;
+    lapras:hasCondition lapras:IsTemperatureCoolCondition ;
     lapras:hasAction lapras:SetAirconPowerOff .
 
 # Conditions
