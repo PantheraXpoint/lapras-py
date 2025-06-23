@@ -555,12 +555,13 @@ class ContextRuleManager:
             # Case 3: Active window - check if expired
             window_start = window_info["start_time"]
             last_extend = window_info["last_extend_time"]
+            current_duration = window_info.get("duration", self.EXTENDED_WINDOW_DURATION)
             time_since_last_extend = current_time - last_extend
             
-            logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Active for '{agent_id}' - time since last extend: {time_since_last_extend:.1f}s / {self.EXTENDED_WINDOW_DURATION}s")
+            logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Active for '{agent_id}' - time since last extend: {time_since_last_extend:.1f}s / {current_duration}s")
             
             # Window expired?
-            if time_since_last_extend >= self.EXTENDED_WINDOW_DURATION:
+            if time_since_last_extend >= current_duration:
                 # Window expired - remove it and allow raw decision
                 del self.extended_window_agents[agent_id]
                 logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: EXPIRED for '{agent_id}' after {time_since_last_extend:.1f}s - allowing raw decision: {raw_rule_decision}")
@@ -569,13 +570,13 @@ class ContextRuleManager:
             # Case 4: Active window, rule says "on" - extend window
             if raw_rule_decision == "on":
                 self.extended_window_agents[agent_id]["last_extend_time"] = current_time
-                remaining_time = self.EXTENDED_WINDOW_DURATION - time_since_last_extend
-                logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Extended for '{agent_id}' (reset to {self.EXTENDED_WINDOW_DURATION}s)")
+                remaining_time = current_duration - time_since_last_extend
+                logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Extended for '{agent_id}' (reset to {current_duration}s)")
                 return "on"
             
             # Case 5: Active window, rule says "off" - continue countdown, stay on
             else:
-                remaining_time = self.EXTENDED_WINDOW_DURATION - time_since_last_extend
+                remaining_time = current_duration - time_since_last_extend
                 logger.info(f"[{self.service_id}] 🕰️  EXTENDED WINDOW: Rule says 'off' for '{agent_id}', but in window ({remaining_time:.1f}s remaining) - staying on")
                 return "on"
 
@@ -589,20 +590,6 @@ class ContextRuleManager:
                 actions.append({"actionName": "turn_on"})
             elif new_state.get("power") == "off":
                 actions.append({"actionName": "turn_off"})
-        
-        # Check for temperature changes
-        if old_state.get("temperature") != new_state.get("temperature"):
-            actions.append({
-                "actionName": "set_temperature",
-                "parameters": {"temperature": new_state.get("temperature")}
-            })
-        
-        # Check for mode changes
-        if old_state.get("mode") != new_state.get("mode"):
-            actions.append({
-                "actionName": "set_mode", 
-                "parameters": {"mode": new_state.get("mode")}
-            })
         
         return actions
 
@@ -686,8 +673,9 @@ class ContextRuleManager:
                 return None
             
             current_time = time.time()
+            current_duration = window_info.get("duration", self.EXTENDED_WINDOW_DURATION)
             time_since_last_extend = current_time - window_info["last_extend_time"]
-            remaining_time = self.EXTENDED_WINDOW_DURATION - time_since_last_extend
+            remaining_time = current_duration - time_since_last_extend
             total_window_time = current_time - window_info["start_time"]
             
             return {
@@ -698,8 +686,8 @@ class ContextRuleManager:
                 "time_since_last_extend": time_since_last_extend,
                 "remaining_time": remaining_time,
                 "total_window_time": total_window_time,
-                "duration": self.EXTENDED_WINDOW_DURATION,
-                "is_expired": time_since_last_extend >= self.EXTENDED_WINDOW_DURATION
+                "duration": current_duration,
+                "is_expired": time_since_last_extend >= current_duration
             }
 
     def evaluate_rules(self, agent_id: str, current_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -1386,6 +1374,23 @@ class ContextRuleManager:
                     {}
                 )
                 return
+            
+            # NEW: Set extended window to 5 seconds for faster threshold response
+            with self.extended_window_lock:
+                current_time = time.time()
+                if agent_id in self.extended_window_agents:
+                    # Override existing window - set to 5 seconds
+                    self.extended_window_agents[agent_id]["duration"] = 5.0
+                    self.extended_window_agents[agent_id]["last_extend_time"] = current_time
+                    logger.info(f"[{self.service_id}] 🕰️ THRESHOLD CONFIG: Set window to 5 seconds for '{agent_id}'")
+                else:
+                    # Create new 5-second window
+                    self.extended_window_agents[agent_id] = {
+                        "start_time": current_time,
+                        "duration": 5.0,
+                        "last_extend_time": current_time
+                    }
+                    logger.info(f"[{self.service_id}] 🕰️ THRESHOLD CONFIG: Created 5-second window for '{agent_id}'")
             
             # Create threshold configuration event for the target agent
             threshold_event = EventFactory.create_threshold_config_event(
