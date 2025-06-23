@@ -35,7 +35,7 @@ class AirconAgent(VirtualAgent):
             }
         
         self.sensor_config = sensor_config
-        self.supported_sensor_types = ["infrared", "distance", "motion", "activity", "temperature"]
+        self.supported_sensor_types = ["infrared", "distance", "motion", "activity", "temperature", "door"]
         
         # Temperature threshold configuration for hot/cool classification - DYNAMIC (simplified)
         self.temperature_threshold_config = {
@@ -62,6 +62,7 @@ class AirconAgent(VirtualAgent):
             "temperature_status": "unknown",  # hot, cool (simplified)
             "temp_threshold": self.temperature_threshold_config["threshold"],  # Expose current threshold
             "current_temperature": None,  # Will be updated by temperature sensor
+            "door_status": "unknown",  # open, closed, unknown
         })
         
         self.sensor_data = defaultdict(dict)  # Store sensor data with sensor_id as key
@@ -210,6 +211,8 @@ class AirconAgent(VirtualAgent):
             self._process_activity_sensor(sensor_payload, sensor_id, current_time)
         elif sensor_payload.sensor_type == "temperature":
             self._process_temperature_sensor(sensor_payload, sensor_id, current_time)
+        elif sensor_payload.sensor_type == "door":
+            self._process_door_sensor(sensor_payload, sensor_id, current_time)
         else:
             logger.warning(f"[{self.agent_id}] Unsupported sensor type: {sensor_payload.sensor_type}")
     
@@ -371,6 +374,37 @@ class AirconAgent(VirtualAgent):
 
             # Rate-limited state publication to context manager
             self._schedule_transmission()
+    
+    def _process_door_sensor(self, sensor_payload: SensorPayload, sensor_id: str, current_time: float):
+        """Process door sensor updates and transform boolean to door_status."""
+        with self.state_lock:
+            # Update sensor data
+            self.sensor_data[sensor_id] = {
+                "sensor_type": sensor_payload.sensor_type,
+                "value": sensor_payload.value,
+                "unit": sensor_payload.unit,
+                "metadata": sensor_payload.metadata,
+            }
+
+            # Transform boolean value to door_status string
+            # True = door open, False = door closed
+            try:
+                door_open_boolean = bool(sensor_payload.value)
+                new_door_status = "open" if door_open_boolean else "closed"
+                
+                if self.local_state.get("door_status") != new_door_status:
+                    self.local_state["door_status"] = new_door_status
+                    logger.info(f"[{self.agent_id}] Updated door_status to: {new_door_status} (boolean value: {door_open_boolean})")
+
+                # Update activity_detected field for rules
+                self._update_activity_detected()
+
+                # Rate-limited state publication to context manager
+                self._schedule_transmission()
+                
+            except (ValueError, TypeError) as e:
+                logger.warning(f"[{self.agent_id}] Could not convert door sensor value to boolean: {sensor_payload.value}, error: {e}")
+                return
     
     def _update_activity_detected(self):
         """Update the activity_detected field that rules use for decisions."""
