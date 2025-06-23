@@ -68,6 +68,7 @@ def main():
             sensor_config = {
                 "light": ["light_1"],
                 "infrared": ["infrared_1", "infrared_2", "infrared_3", "infrared_4"],
+                "distance": ["distance_1", "distance_2", "distance_3", "distance_4"],
                 "motion": ["motion_01", "motion_02", "motion_03", "motion_04", "motion_05", "motion_06", "motion_07", "motion_08", "motion_mf1","motion_mb1"],
                 "temperature": ["temperature_3"],
                 "door": ["door_01"],
