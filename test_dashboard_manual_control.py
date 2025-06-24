@@ -19,7 +19,7 @@ logging.disable(logging.CRITICAL)
 os.environ['PYTHONWARNINGS'] = 'ignore'
 
 # Import the existing EnhancedDashboardSubscriber
-from dashboard_interface.new_dashboard_subscriber import EnhancedDashboardSubscriber
+from utils.new_dashboard_subscriber import EnhancedDashboardSubscriber
 
 class InteractiveManualControlDashboard:
     """Interactive dashboard for manual control of virtual agents."""
@@ -567,17 +567,17 @@ class InteractiveManualControlDashboard:
         print(f"Preset: {preset_name}")
         print(f"Configuration: {config}")
         print()
-        
+
         # Check connection status
         if not hasattr(self.subscriber, 'mqtt_client') or not self.subscriber.mqtt_client.is_connected():
             print("❌ MQTT connection lost. Trying to reconnect...")
             if not self.initialize_subscriber():
                 input("\nPress Enter to continue...")
                 return False
-        
+
         # Send the threshold configuration command
         command_id = self.subscriber.send_threshold_command(agent_id, threshold_type, config)
-        
+
         if command_id:
             print(f"📤 Threshold configuration sent with ID: {command_id}")
             print("⏳ Waiting for configuration result...")
@@ -585,36 +585,36 @@ class InteractiveManualControlDashboard:
             print("❌ Failed to send threshold configuration")
             input("\nPress Enter to continue...")
             return False
-        
+
         # Wait and monitor for results
         start_time = time.time()
         max_wait_time = 15  # Wait up to 15 seconds (same as regular commands)
-        
+
         while time.time() - start_time < max_wait_time:
             time.sleep(1)
             elapsed = time.time() - start_time
             print(f"\r⏳ Waiting... ({elapsed:.1f}s/{max_wait_time}s)", end="", flush=True)
-            
+
             # Get threshold results from the subscriber
             threshold_results = self.subscriber.get_threshold_results()
             result = threshold_results.get(command_id)
-            
+
             if result:
                 success = result.get('success', False)
                 message = result.get('message', 'No message')
                 current_config = result.get('current_config', {})
-                
+
                 print(f"\n\n✅ Threshold Configuration Result:")
                 print(f"   Success: {success}")
                 print(f"   Message: {message}")
                 print(f"   Current Config: {current_config}")
-                
+
                 if success:
                     print(f"🎉 Threshold configuration was successful!")
                     print(f"🔄 The agent will now use the new {threshold_type} thresholds")
                 else:
                     print("❌ Threshold configuration failed!")
-                
+
                 input("\nPress Enter to continue...")
                 return success
         
@@ -625,6 +625,43 @@ class InteractiveManualControlDashboard:
         print("   • The context manager is not running")
         print("   • Network connectivity issues")
         input("\nPress Enter to continue...")
+        return False
+
+    def send_threshold_configuration_silently(self, agent_id: str, threshold_config: dict):
+        if not self.subscriber:
+            if not self.initialize_subscriber():
+                return False
+
+        threshold_type = threshold_config['threshold_type']
+        config = threshold_config['config']
+
+        # Check connection status
+        if not hasattr(self.subscriber, 'mqtt_client') or not self.subscriber.mqtt_client.is_connected():
+            print("❌ MQTT connection lost. Trying to reconnect...")
+            if not self.initialize_subscriber():
+                return False
+
+        # Send the threshold configuration command
+        command_id = self.subscriber.send_threshold_command(agent_id, threshold_type, config)
+
+        if command_id:
+            print(f"📤 Threshold configuration sent with ID: {command_id}")
+        else:
+            print("❌ Failed to send threshold configuration")
+            return False
+
+        # Wait and monitor for results
+        start_time = time.time()
+
+        while time.time() - start_time < 15:
+            time.sleep(1)
+            # Get threshold results from the subscriber
+            threshold_results = self.subscriber.get_threshold_results()
+            result = threshold_results.get(command_id)
+
+            if result:
+                success = result.get('success', False)
+                return success
         return False
     
     def run(self):

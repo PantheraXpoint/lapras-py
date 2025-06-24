@@ -41,8 +41,8 @@ class MeetingRoomDesign:
         'infrared_3': (8, 3),
         'infrared_4': (8, 2),
         # AC
-        'AC A01': (4, 2),
-        'AC A02': (4, 5),
+        'tilt_1': (4, 2),
+        'tilt_2': (4, 5),
     }
     cell_w = 80
     cell_h = 80
@@ -146,10 +146,10 @@ class MeetingRoomDesign:
                 label = 'TV'
                 default_color = self.tv_color
                 sensor_type = 'tv'
-            elif eid.startswith('AC'):
+            elif eid.startswith('tilt'):
                 label = 'AC'
                 default_color = self.ac_color
-                sensor_type = 'ac'
+                sensor_type = 'tilt'
             else:
                 label = eid
                 default_color = "#888"
@@ -165,6 +165,7 @@ class MeetingRoomDesign:
                 sensor_type = "준비 중"
             # 색상만 동적으로 결정
             color = default_color
+            onclick = f"showSensorInfo('{eid}', '{sensor_type}', {str(value).lower() if value is not None else 'null'}, event.clientX, event.clientY)"
             if value is not None:
                 if sensor_type == 'activity':
                     color = "#4CAF50" if value else "#BDBDBD"
@@ -206,8 +207,6 @@ class MeetingRoomDesign:
                     svg.append(f'<text x="{x - 5}" y="{y - 10}" fill="#333333" font-size="10" text-anchor="end">{label} ({value})</text>')
             else:
                 print("나머지", eid, color, sensor_type, value)
-            # 클릭 이벤트: showSensorInfo 호출 (SVG 내에서 JS로 전달)
-            onclick = f"showSensorInfo('{eid}', '{sensor_type}', {str(value).lower() if value is not None else 'null'}, event.clientX, event.clientY)"
 
             if eid.startswith('activity'):
                 svg.append(f'<circle cx="{x}" cy="{y}" r="28" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"></circle>')
@@ -230,7 +229,7 @@ class MeetingRoomDesign:
             elif eid.startswith('TV'):
                 svg.append(f'<rect x="{x-50}" y="{y-22}" width="100" height="44" rx="8" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
                 svg.append(f'<text x="{x}" y="{y+8}" font-size="16" text-anchor="middle" fill="#fff">{label}</text>')
-            elif eid.startswith('AC'):
+            elif eid.startswith('tilt'):
                 svg.append(f'<rect x="{x-35}" y="{y-35}" width="70" height="70" rx="16" fill="{color}" stroke="#222" stroke-width="2" onclick="{onclick}" style="cursor:pointer;"/>')
                 svg.append(f'<text x="{x}" y="{y+10}" font-size="18" text-anchor="middle" fill="#222">{label}</text>')
         svg.append('</svg>')

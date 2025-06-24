@@ -4,6 +4,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 # from utils.new_dashboard_subscriber import EnhancedDashboardSubscriber as eds
 from test_sensor_config_dashboard import InteractiveSensorConfigDashboard
 from test_dashboard_manual_control import InteractiveManualControlDashboard
+from test_rule_agent import RuleAgentTester
 # from utils.new_dashboard_subscriber import InteractiveManualControlDashboard as dashboardsubscriber
 from lapras_middleware.event_db import get_event_db, query_event_db
 from design import MeetingRoomDesign
@@ -29,6 +30,10 @@ def main():
     if 'last_update_time' not in st.session_state:
         st.session_state.last_update_time = time.time()
     # Initialize DashboardClient instance and related session_state variables
+    client = InteractiveManualControlDashboard()
+    client.initialize_subscriber()
+    ruleAgent = RuleAgentTester()
+
     if 'mqtt_client' not in st.session_state:
         st.info("Initializing MQTT client...")
 
@@ -39,7 +44,6 @@ def main():
             # Create the client object before connecting to the broker
             # client = eds(mqtt_broker=mqtt_broker, mqtt_port=mqtt_port)
             sensor_config_client = InteractiveSensorConfigDashboard(mqtt_broker=mqtt_broker, mqtt_port=mqtt_port)
-            client = InteractiveManualControlDashboard()
             print("MQTT client created successfully in try")
             print(f"client is not None: {client is not None}")
             print(f"sensor_config_client is not None: {sensor_config_client is not None}")
@@ -59,35 +63,6 @@ def main():
             st.session_state.last_event_type = "None"
             st.session_state.last_event_timestamp = time.time()
 
-            # # Try to connect the MQTT client
-            # try:
-            #     # print(f"Attempting to connect to MQTT broker {mqtt_broker}:{mqtt_port}...")
-            #     client.mqtt_client.connect(mqtt_broker, mqtt_port)
-
-            #     # Wait briefly for initial connection and subscription
-            #     time.sleep(2)
-
-            #     # Subscribe to command result topic (EnhancedDashboardSubscriber does not subscribe by default)
-            #     client.mqtt_client.subscribe("dashboard/control/result", qos=1)
-            #     # print("Subscribed to command result topic 'dashboard/control/result'")
-
-            #     # Start the MQTT loop
-            #     client.mqtt_client.loop_start()
-
-            #     st.success("MQTT client initialized. Waiting for messages...")
-            #     st.rerun() # Rerun after initialization
-
-            # except ValueError as ve:
-            #     st.error(f"Invalid MQTT broker address: {ve}")
-            #     st.warning("Please check the MQTT broker address.")
-            #     st.session_state.mqtt_client = None
-            #     st.stop()
-            # except Exception as conn_e:
-            #     st.error(f"Failed to connect to MQTT broker: {conn_e}")
-            #     st.warning("Please check the MQTT broker or network status.")
-            #     st.session_state.mqtt_client = None
-            #     st.stop()
-
         except Exception as e:
             st.error(f"Failed to initialize MQTT client: {e}")
             st.warning("Unable to connect to MQTT broker. Please check your internet connection and broker address.")
@@ -101,7 +76,6 @@ def main():
     if 'mqtt_last_update_time' not in st.session_state:
         st.session_state.mqtt_last_update_time = 0
 
-    client = st.session_state.get('mqtt_client')
     sensor_config_client = st.session_state.get('sensor_config_client')
     designer = st.session_state.room_designer
     db = get_event_db()  # Initialize the event database connection
@@ -125,9 +99,9 @@ def main():
         st.subheader("Service Adjustments:")
         value = st.text_input("Adjust Sensor Threshold:", key="value_adjustment", value="40", type="default")
         threshold_category = st.text_input("Threshold Category", key="category_adjustment", value="cool_preference", type="default")
-        threshold_type = st.text_input("Threshold Type", key="threshold_type", value="temperature", type="default")
         agent_id = st.text_input("Which service to modify?", key="agent_id_addition", value="aircon", type="default")
         update_req = st.button("Update Rule", key="update_rules", use_container_width=True)
+        add_req = st.button("Add Sensor", key="add_sensor", use_container_width=True)
     if update_req:
         if not sensor_config_client:
             st.error("Sensor configuration client not available. Please refresh the page.")
@@ -140,36 +114,32 @@ def main():
                     st.error("Please set a category for the threshold.")
                 if not agent_id:
                     st.error("Please specify the service ID to update.")
-                if not threshold_type:
-                    st.error("Please specify the threshold type (e.g., 'temperature', 'humidity').")
+                if not clicked_sensor:
+                    st.error("Please select a sensor first!")
                 else:
-                    # TODO Quang
+                    threshold_type = clicked_sensor.split('_')[-1]
                     config = {
                         "preset_name": threshold_category,
                         "threshold_type": threshold_type,
                         "config": {"threshold": value}
                     }
-                    client.send_threshold_configuration(agent_id, config)
+                    client.send_threshold_configuration_silently(agent_id, config)
                     st.success(f"Automation rule updated to {value}.")
             except ValueError:
                 st.error("Invalid input. Please enter a numeric value for temperature.")
 
-    with col2:
-        # st.write("")
-        agent_id = st.text_input("agent ID", key="agent_attached", value="aircon", type="default")
-        sensor_type = st.text_input("Sensor Type", key="sensor_type_adding", value="infrared", type="default")
-        sensor_id = st.text_input("Sensor ID", key="sensor_id_adding", value="1", type="default")
-        add_req = st.button("Add Sensor", key="add_sensor", use_container_width=True)
     if add_req:
         if not sensor_config_client:
             st.error("Sensor configuration client not available. Please refresh the page.")
-        elif agent_id and sensor_type:
-            # TODO Quang
+        elif agent_id and clicked_sensor:
+            sensor_type = clicked_sensor.split('_')[-1]
+            if sensor_type == 'door':
+                ruleAgent.send_dashboard_rules_request("load", rule_files=["lapras_middleware/rules/aircon_door.ttl"])
             config = {
-                sensor_type: [f"{sensor_type}_{sensor_id}"],
+                sensor_type: [f"{clicked_sensor}"],
             }
             sensor_config_client.send_sensor_config_command(agent_id, "add", config)
-            st.success(f"Sensor {sensor_type} added successfully to {agent_id}.")
+            st.success(f"Sensor {clicked_sensor} added successfully to {agent_id}.")
         else:
             st.error("Please provide both Service ID and Sensor ID to add a sensor.")
 
@@ -197,6 +167,26 @@ def main():
             st.info("No data found for this sensor!")
     light_switch = light_btn.button("Light Switch", key="light_switch", use_container_width=True)
     ac_switch = ac_btn.button("AC Switch", key="ac_switch", use_container_width=True)
+    if "light_state" not in st.session_state:
+        st.session_state.light_state = "unknown"
+    if "ac_state" not in st.session_state:
+        st.session_state.ac_state = "unknown"
+
+    if light_switch:
+        if st.session_state.light_state == "off":
+            client.subscriber.send_command(TARGET_LIGHT_AGENT_ID, "turn_on")
+            st.session_state.light_state = "on"
+        elif st.session_state.light_state == "on":
+            client.subscriber.send_command(TARGET_LIGHT_AGENT_ID, "turn_off")
+            st.session_state.light_state = "off"
+
+    if ac_switch:
+        if st.session_state.ac_state == "off":
+            client.subscriber.send_command(TARGET_AC_AGENT_ID, "turn_on")
+            st.session_state.ac_state = "on"
+        elif st.session_state.ac_state == "on":
+            client.subscriber.send_command(TARGET_AC_AGENT_ID, "turn_off")
+            st.session_state.ac_state = "off"
 
     while True:
         all_sensors = client.subscriber.get_all_sensors() if client else {}
@@ -213,33 +203,27 @@ def main():
 
         all_agents = client.subscriber.get_all_agents() if client else {}
         if all_agents:
-            power_state = all_agents[TARGET_LIGHT_AGENT_ID].get('state', {}).get('power', 'unknown')
+            light_state = all_agents[TARGET_LIGHT_AGENT_ID].get('state', {}).get('power', 'unknown')
+            st.session_state.light_state = light_state
             with light_icon:
                 st.markdown(
-                    f"<div style='display: flex; align-items: center; height: 100%; justify-content: center; font-size: 2em;'>{'💡' if power_state == 'on' else '⚫'}</div>",
+                    f"<div style='display: flex; align-items: center; height: 100%; justify-content: center; font-size: 2em;'>{'💡' if light_state == 'on' else '⚫'}</div>",
                     unsafe_allow_html=True
                 )
-            if light_switch and power_state == "off":
-                client.send_command(TARGET_LIGHT_AGENT_ID, "turn_on")
-            elif light_switch and power_state == "on":
-                client.send_command(TARGET_LIGHT_AGENT_ID, "turn_off")
 
-            power_state = all_agents[TARGET_AC_AGENT_ID].get('state', {}).get('power', 'unknown')
+            ac_state = all_agents[TARGET_AC_AGENT_ID].get('state', {}).get('power', 'unknown')
+            st.session_state.ac_state = ac_state
             with ac_icon:
                 st.markdown(
-                    f"<div style='display: flex; align-items: center; height: 100%; justify-content: center; font-size: 2em;'>{'❄️' if power_state == 'on' else '⚫'}</div>",
+                    f"<div style='display: flex; align-items: center; height: 100%; justify-content: center; font-size: 2em;'>{'❄️' if ac_state == 'on' else '⚫'}</div>",
                     unsafe_allow_html=True
                 )
-            if ac_switch and power_state == "off":
-                client.send_command(TARGET_AC_AGENT_ID, "turn_on")
-            elif ac_switch and power_state == "on":
-                client.send_command(TARGET_AC_AGENT_ID, "turn_off")
 
-        time.sleep(1)
+        time.sleep(2)
 
 if __name__ == "__main__":
-    st.set_page_config(page_title="Live IoT Dashboard", layout="wide")
-    st.title("Live IoT Dashboard - Real-time Updates")
+    st.set_page_config(page_title="Live IoT Control Application", layout="wide")
+    st.title("Live IoT Control Application - Real-time Updates")
     client = None
     if 'room_designer' not in st.session_state:
         st.session_state.room_designer = MeetingRoomDesign()
