@@ -147,9 +147,35 @@ def main():
         st.write("")
         st.button("Remove Sensor", key="remove_sensor", use_container_width=True)
 
-    last_svg = ""
+    # --- Sensor Graphs Section in Main Content Area ---
+    with col1:
+        st.subheader("Sensor Data")
+        
+        # Define four sensors to monitor
+        monitored_sensors = ['temperature_3', 'light_1', 'tilt_1', 'tilt_2', 'infrared_1', 'distance_1', 'distance_2', 'distance_3', 'distance_4']
+        
+        for sensor_id in monitored_sensors:
+            st.write(f"**{sensor_id}**")
+            # Querying the sensor data from database
+            sensor_data = query_event_db(db, sensor_id)
+            if sensor_data:
+                # Convert timestamp to datetime for plotting
+                df = pd.DataFrame([
+                    {
+                        'timestamp': sensor_value['timestamp'],
+                        'value': sensor_value['value']
+                    }
+                    for sensor_value in sensor_data
+                ])
+                # Plot the data using Streamlit's line chart
+                st.line_chart(df.set_index('timestamp')['value'], height=200)
+            else:
+                st.info(f"No data found for {sensor_id}")
+            st.write("---")
+
+    # Show selected sensor if any
     if clicked_sensor:
-        st.write(f"Chosen sensor: {clicked_sensor}")
+        st.write(f"**Selected sensor: {clicked_sensor}**")
         # Querying the sensor data from database
         sensor_data = query_event_db(db, clicked_sensor)
         if sensor_data:
@@ -165,6 +191,7 @@ def main():
             st.line_chart(df.set_index('timestamp')['value'])
         else:
             st.info("No data found for this sensor!")
+
     light_switch = light_btn.button("Light Switch", key="light_switch", use_container_width=True)
     ac_switch = ac_btn.button("AC Switch", key="ac_switch", use_container_width=True)
     if "light_state" not in st.session_state:
@@ -188,6 +215,7 @@ def main():
             client.subscriber.send_command(TARGET_AC_AGENT_ID, "turn_off")
             st.session_state.ac_state = "off"
 
+    last_svg = ""
     while True:
         all_sensors = client.subscriber.get_all_sensors() if client else {}
         if all_sensors:
