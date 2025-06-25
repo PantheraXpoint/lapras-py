@@ -117,7 +117,7 @@ def main():
                 if not clicked_sensor:
                     st.error("Please select a sensor first!")
                 else:
-                    threshold_type = clicked_sensor.split('_')[-1]
+                    threshold_type = clicked_sensor.split('_')[0]
                     config = {
                         "preset_name": threshold_category,
                         "threshold_type": threshold_type,
@@ -132,7 +132,7 @@ def main():
         if not sensor_config_client:
             st.error("Sensor configuration client not available. Please refresh the page.")
         elif agent_id and clicked_sensor:
-            sensor_type = clicked_sensor.split('_')[-1]
+            sensor_type = clicked_sensor.split('_')[0]
             if sensor_type == 'door':
                 ruleAgent.send_dashboard_rules_request("load", rule_files=["lapras_middleware/rules/aircon_door.ttl"])
             config = {
