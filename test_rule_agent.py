@@ -68,7 +68,8 @@ class RuleAgentTester:
             "lapras_middleware/rules/aircon_activity_motion.ttl",
             "lapras_middleware/rules/aircon_ir_activity.ttl",
             "lapras_middleware/rules/aircon_ir_acitivity_motion.ttl",
-            "lapras_middleware/rules/aircon_door.ttl"
+            "lapras_middleware/rules/aircon_door.ttl",
+            "lapras_middleware/rules/aircon_ir_temperature.ttl"
         ]
         
         print(f"🤖 Rule Agent Tester initialized")
