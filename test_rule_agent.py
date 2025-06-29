@@ -8,6 +8,7 @@ import time
 import json
 import sys
 import os
+import uuid
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import paho.mqtt.client as mqtt
@@ -15,7 +16,7 @@ from lapras_middleware.event import EventFactory, MQTTMessage, TopicManager, Eve
 import logging
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class RuleAgentTester:
@@ -23,15 +24,28 @@ class RuleAgentTester:
     
     def __init__(self, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
         """Initialize the tester."""
-        self.client_id = "RuleAgentTester"
+        # Use unique client ID to prevent conflicts
+        self.client_id = f"RuleAgentTester_{int(time.time())}_{str(uuid.uuid4())[:8]}"
+        
         self.mqtt_client = mqtt.Client(client_id=self.client_id)
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message
-        self.mqtt_client.connect(mqtt_broker, mqtt_port)
-        self.mqtt_client.loop_start()
+        self.mqtt_client.on_disconnect = self._on_disconnect
+        
+        # Disable automatic reconnect to prevent loops
+        self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=60)
+        
+        # Track connection and subscription state
+        self.is_connected = False
+        self.is_subscribed = False
+        self.connection_attempts = 0
+        self.max_connection_attempts = 3
         
         # Track responses
         self.responses = {}
+        
+        # Connect to MQTT broker with retry logic
+        self._connect_with_retry(mqtt_broker, mqtt_port)
         
         # Rule presets with descriptions
         self.presets = {
@@ -49,7 +63,14 @@ class RuleAgentTester:
             "aircon_door_only": "Aircon - Door sensor only",
             "aircon_door_sensors": "Aircon - Door + IR sensors",
             "both_devices_motion": "Both devices - Motion only",
-            "both_devices_all": "Both devices - All sensors"
+            "both_devices_all": "Both devices - All sensors",
+            # ClubHouseAgent presets
+            "back_read": "ClubHouse - Back area reading mode",
+            "front_read": "ClubHouse - Front area reading mode", 
+            "back_nap": "ClubHouse - Back area nap mode",
+            "front_nap": "ClubHouse - Front area nap mode",
+            "all_normal": "ClubHouse - All areas normal mode",
+            "all_clean": "ClubHouse - All areas cleaning mode"
         }
         
         # Available rule files
@@ -69,20 +90,77 @@ class RuleAgentTester:
             "lapras_middleware/rules/aircon_ir_activity.ttl",
             "lapras_middleware/rules/aircon_ir_acitivity_motion.ttl",
             "lapras_middleware/rules/aircon_door.ttl",
-            "lapras_middleware/rules/aircon_ir_temperature.ttl"
+            "lapras_middleware/rules/aircon_ir_temperature.ttl",
+            # ClubHouseAgent rule files
+            "lapras_middleware/rules/back-read.ttl",
+            "lapras_middleware/rules/front-read.ttl",
+            "lapras_middleware/rules/back-nap.ttl", 
+            "lapras_middleware/rules/front-nap.ttl",
+            "lapras_middleware/rules/all-normal.ttl",
+            "lapras_middleware/rules/all-clean.ttl"
         ]
-        
-        print(f"🤖 Rule Agent Tester initialized")
     
+    def _connect_with_retry(self, mqtt_broker: str, mqtt_port: int):
+        """Connect to MQTT broker with retry logic and exponential backoff."""
+        self.connection_attempts = 0
+        
+        while self.connection_attempts < self.max_connection_attempts:
+            try:
+                self.connection_attempts += 1
+                print(f"🔌 Connecting to MQTT broker... (attempt {self.connection_attempts}/{self.max_connection_attempts})")
+                
+                # Try to connect
+                result = self.mqtt_client.connect(mqtt_broker, mqtt_port, keepalive=60)
+                if result == mqtt.MQTT_ERR_SUCCESS:
+                    # Start the loop
+                    self.mqtt_client.loop_start()
+                    
+                    # Wait for connection with timeout
+                    timeout = 10
+                    start_time = time.time()
+                    while not self.is_connected and (time.time() - start_time) < timeout:
+                        time.sleep(0.1)
+                    
+                    if self.is_connected:
+                        print(f"🤖 Rule Agent Tester initialized (connected to {mqtt_broker}:{mqtt_port})")
+                        return  # Success!
+                    else:
+                        print(f"⏰ Connection timeout on attempt {self.connection_attempts}")
+                        self.mqtt_client.loop_stop()
+                        self.mqtt_client.disconnect()
+                else:
+                    print(f"❌ Connection failed with error code: {result}")
+                    
+            except Exception as e:
+                print(f"❌ Connection error on attempt {self.connection_attempts}: {e}")
+            
+            # Exponential backoff delay before retry (unless it's the last attempt)
+            if self.connection_attempts < self.max_connection_attempts:
+                delay = 2 ** self.connection_attempts  # 2, 4, 8 seconds
+                print(f"⏳ Waiting {delay} seconds before retry...")
+                time.sleep(delay)
+        
+        print(f"❌ Failed to connect after {self.max_connection_attempts} attempts")
+        print("💡 Tip: Check if MQTT broker is running and accessible")
+
     def _on_connect(self, client, userdata, flags, rc):
         """Callback when connected to MQTT broker."""
         if rc == 0:
-            # Subscribe to dashboard rule responses
-            response_topic = TopicManager.dashboard_rules_response()
-            client.subscribe(response_topic, qos=1)
-            logger.info(f"Subscribed to {response_topic}")
+            self.is_connected = True
+            self.connection_attempts = 0  # Reset attempts on successful connection
+            
+            # Only subscribe if not already subscribed
+            if not self.is_subscribed:
+                response_topic = TopicManager.dashboard_rules_response()
+                result = client.subscribe(response_topic, qos=1)
+                if result[0] == mqtt.MQTT_ERR_SUCCESS:
+                    self.is_subscribed = True
+                    print(f"✅ Connected and subscribed to rule responses")
+                else:
+                    print(f"❌ Failed to subscribe to {response_topic}")
         else:
-            logger.error(f"Failed to connect. Result code: {rc}")
+            print(f"❌ Failed to connect to MQTT broker. Result code: {rc}")
+            self.is_connected = False
     
     def _on_message(self, client, userdata, msg):
         """Callback when message is received."""
@@ -107,11 +185,27 @@ class RuleAgentTester:
                 print(f"   🔗 ID: {command_id}")
                 
         except Exception as e:
-            logger.error(f"Error processing message: {e}")
+            print(f"❌ Error processing message: {e}")
+    
+    def _on_disconnect(self, client, userdata, rc):
+        """Callback when disconnected from MQTT broker."""
+        self.is_connected = False
+        self.is_subscribed = False
+        
+        # Only show warning for unexpected disconnections (not manual)
+        if rc != 0:
+            print(f"⚠️  Unexpected disconnection from MQTT broker (error code: {rc})")
+            print(f"📡 Connection will not auto-reconnect to prevent loops")
+            # Don't auto-reconnect - let user manually restart if needed
     
     def send_dashboard_rules_request(self, action: str, preset_name: str = None, rule_files: list = None):
         """Send a dashboard rules request via Rule Agent."""
         try:
+            # Check if connected
+            if not self.is_connected:
+                print("❌ Cannot send request - not connected to MQTT broker")
+                return None
+                
             # Create dashboard rules request event
             event = EventFactory.create_dashboard_rules_request_event(
                 action=action,
@@ -125,18 +219,37 @@ class RuleAgentTester:
             message = MQTTMessage.serialize(event)
             result = self.mqtt_client.publish(request_topic, message, qos=1)
             
-            print(f"📤 Sent request: {action}")
-            if preset_name:
-                print(f"   📋 Preset: {preset_name}")
-            if rule_files:
-                print(f"   📄 Files: {[f.split('/')[-1] for f in rule_files]}")
-            print(f"   🔗 ID: {event.event.id}")
-            
-            return event.event.id
+            if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                print(f"📤 Sent request: {action}")
+                if preset_name:
+                    print(f"   📋 Preset: {preset_name}")
+                if rule_files:
+                    print(f"   📄 Files: {[f.split('/')[-1] for f in rule_files]}")
+                print(f"   🔗 ID: {event.event.id}")
+                return event.event.id
+            else:
+                print(f"❌ Failed to send request. MQTT error: {result.rc}")
+                return None
             
         except Exception as e:
-            logger.error(f"Error sending request: {e}")
+            print(f"❌ Error sending request: {e}")
             return None
+    
+    def reconnect_manually(self, mqtt_broker: str = "143.248.57.73", mqtt_port: int = 1883):
+        """Manually reconnect to MQTT broker."""
+        print("🔄 Manual reconnection requested...")
+        
+        # Stop current connection if any
+        if self.is_connected:
+            self.mqtt_client.loop_stop()
+            self.mqtt_client.disconnect()
+            time.sleep(1)  # Give time for clean disconnect
+        
+        self.is_connected = False
+        self.is_subscribed = False
+        
+        # Retry connection
+        self._connect_with_retry(mqtt_broker, mqtt_port)
     
     def wait_for_response(self, command_id: str, timeout: int = 10):
         """Wait for a response to a specific command."""
@@ -149,8 +262,18 @@ class RuleAgentTester:
     
     def stop(self):
         """Stop the tester."""
-        self.mqtt_client.loop_stop()
-        self.mqtt_client.disconnect()
+        print("🛑 Stopping Rule Agent Tester...")
+        
+        # Clean disconnect
+        self.is_connected = False
+        self.is_subscribed = False
+        
+        try:
+            self.mqtt_client.loop_stop()
+            self.mqtt_client.disconnect()
+            print("✅ Disconnected cleanly")
+        except Exception as e:
+            print(f"⚠️  Error during disconnect: {e}")
 
 
 def automated_test():
@@ -165,12 +288,14 @@ def automated_test():
         ("list", {}, "List currently loaded rules"),
         ("switch_preset", {"preset_name": "hue_motion_only"}, "Switch to hue_motion_only preset"),
         ("list", {}, "List rules after preset switch"),
-        ("switch_preset", {"preset_name": "hue_activity_only"}, "Switch to hue_activity_only preset"),
-        ("list", {}, "List rules after activity switch"),
-        ("switch_preset", {"preset_name": "hue_all_sensors"}, "Switch to hue_all_sensors preset"),
-        ("list", {}, "List rules after all sensors switch"),
-        ("switch", {"rule_files": ["lapras_middleware/rules/hue_ir_motion.ttl", "lapras_middleware/rules/aircon_activity.ttl"]}, "Switch to custom rules"),
-        ("list", {}, "List rules after custom switch"),
+        ("switch_preset", {"preset_name": "back_nap"}, "Switch to ClubHouse back_nap preset"),
+        ("list", {}, "List rules after ClubHouse back_nap switch"),
+        ("switch_preset", {"preset_name": "front_read"}, "Switch to ClubHouse front_read preset"),
+        ("list", {}, "List rules after ClubHouse front_read switch"),
+        ("switch", {"rule_files": ["lapras_middleware/rules/back-nap.ttl", "lapras_middleware/rules/front-read.ttl"]}, "Switch to ClubHouse custom rules"),
+        ("list", {}, "List rules after ClubHouse custom switch"),
+        ("switch_preset", {"preset_name": "all_normal"}, "Switch to ClubHouse all_normal preset"),
+        ("list", {}, "List rules after all_normal switch"),
         ("clear", {}, "Clear all rules"),
         ("list", {}, "List rules after clear"),
         ("switch_preset", {"preset_name": "both_devices_motion"}, "Switch to both_devices_motion preset"),
@@ -205,6 +330,11 @@ def interactive_test():
     
     try:
         while True:
+            # Show connection status
+            status_icon = "🟢" if tester.is_connected else "🔴"
+            status_text = "Connected" if tester.is_connected else "Disconnected"
+            print(f"\n📡 MQTT Status: {status_icon} {status_text}")
+            
             print("\n🎯 Available Commands:")
             print("1. List presets")
             print("2. List loaded rules")
@@ -212,10 +342,14 @@ def interactive_test():
             print("4. Switch to custom files")
             print("5. Clear rules")
             print("6. Load additional rules")
-            print("7. Exit")
+            print("7. Reconnect to MQTT broker")
+            print("8. Exit")
             
-            choice = input("\nEnter your choice (1-7): ").strip()
+            choice = input("\nEnter your choice (1-8): ").strip()
             
+            if not choice:  # Handle empty input
+                continue
+                
             if choice == "1":
                 print("📋 Listing available presets...")
                 cmd_id = tester.send_dashboard_rules_request("list_presets")
@@ -312,12 +446,18 @@ def interactive_test():
                     print("❌ Invalid input format")
                     
             elif choice == "7":
+                print("🔄 Reconnecting to MQTT broker...")
+                tester.reconnect_manually()
+                
+            elif choice == "8":
+                print("👋 Exiting...")
                 break
                 
             else:
-                print("❌ Invalid choice")
+                print(f"❌ Invalid choice: '{choice}'. Please enter a number between 1-8.")
             
-            print()
+            # Small delay to prevent rapid execution
+            time.sleep(0.1)
     
     except KeyboardInterrupt:
         print("\n👋 Exiting...")

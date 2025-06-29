@@ -4,6 +4,7 @@ import json
 import threading
 from typing import Dict, Any, Optional, List
 import uuid
+import os
 
 import paho.mqtt.client as mqtt
 import rdflib
@@ -57,7 +58,14 @@ class ContextRuleManager:
             "both_devices_all": [
                 "lapras_middleware/rules/hue_ir_activity_motion.ttl",
                 "lapras_middleware/rules/aircon_ir_acitivity_motion.ttl"
-            ]
+            ],
+            # ClubHouseAgent presets
+            "back_read": ["lapras_middleware/rules/back-read.ttl"],
+            "front_read": ["lapras_middleware/rules/front-read.ttl"],
+            "back_nap": ["lapras_middleware/rules/back-nap.ttl"],
+            "front_nap": ["lapras_middleware/rules/front-nap.ttl"],
+            "all_normal": ["lapras_middleware/rules/all-normal.ttl"],
+            "all_clean": ["lapras_middleware/rules/all-clean.ttl"]
         }
         
         # Track known virtual agents for dynamic topic subscription
@@ -77,6 +85,10 @@ class ContextRuleManager:
         self.manual_override_agents: Dict[str, float] = {}  # agent_id -> override_expiry_time
         self.manual_override_lock = threading.Lock()
         self.MANUAL_OVERRIDE_DURATION = 120.0  # 120 seconds override after manual command
+        
+        # Track agents needing mode detection (for startup when agents aren't connected yet)
+        self.pending_mode_detection: set = set()  # Set of agent_ids that need mode detection
+        self.pending_mode_detection_lock = threading.Lock()
         
         # Set up MQTT client with a unique client ID and clean session
         mqtt_client_id = f"{self.service_id}-{int(time.time()*1000)}-{uuid.uuid4().hex[:8]}"
@@ -370,6 +382,9 @@ class ContextRuleManager:
                     del self.manual_override_agents[agent_id]
                     logger.info(f"[{self.service_id}] Manual override expired for '{agent_id}' - automatic rules now resume")
             
+            # Check if this is a new agent that needs delayed mode detection
+            is_new_agent = agent_id not in self.known_agents
+            
             # Update context map
             with self.context_lock:
                 new_state = context_payload.state.copy()
@@ -391,15 +406,40 @@ class ContextRuleManager:
                 logger.info(f"[{self.service_id}] 📨 CONTEXT UPDATE: Updated context for agent {agent_id}, context payload {new_state}")
                 logger.debug(f"[{self.service_id}] Current context map: {json.dumps(self.context_map, indent=2)}")
             
-            # Track this agent for future action commands
+            # Track this agent for future action commands FIRST (before delayed mode detection)
             self.known_agents.add(agent_id)
+            
+            # Handle delayed mode detection for new agents
+            if is_new_agent:
+                with self.pending_mode_detection_lock:
+                    if agent_id in self.pending_mode_detection:
+                        logger.info(f"[{self.service_id}] 🔄 DELAYED MODE DETECTION: Agent '{agent_id}' connected - applying targeted mode detection")
+                        self.pending_mode_detection.remove(agent_id)
+                        # Apply mode detection only for rules relevant to this specific agent
+                        if self.loaded_rule_files:
+                            relevant_rules = [rule_file for rule_file in self.loaded_rule_files 
+                                            if agent_id in os.path.basename(rule_file)]
+                            if relevant_rules:
+                                logger.info(f"[{self.service_id}] 🔄 DELAYED MODE DETECTION: Processing {len(relevant_rules)} relevant rules for '{agent_id}': {relevant_rules}")
+                                self._detect_and_apply_modes_from_rules(relevant_rules)
+                            else:
+                                logger.debug(f"[{self.service_id}] No relevant rules found for agent '{agent_id}'")
+                        else:
+                            logger.debug(f"[{self.service_id}] No loaded rules for delayed mode detection")
+                    else:
+                        logger.debug(f"[{self.service_id}] New agent '{agent_id}' connected but no pending mode detection needed")
             
             # Publish updated dashboard state
             self._publish_dashboard_state_update()
             
-            # Immediately apply rules for this agent (will be skipped during override)
-            logger.info(f"[{self.service_id}] 📨 CONTEXT UPDATE: About to apply rules for '{agent_id}' - manual override: {manual_override_active}")
-            self._apply_rules_for_agent(agent_id, new_state, event.event.timestamp)
+            # Only apply rules if there are rules relevant to this agent
+            has_relevant_rules = any(agent_id in os.path.basename(rule_file) for rule_file in self.loaded_rule_files)
+            if has_relevant_rules:
+                # Immediately apply rules for this agent (will be skipped during override)
+                logger.info(f"[{self.service_id}] 📨 CONTEXT UPDATE: About to apply rules for '{agent_id}' - manual override: {manual_override_active}")
+                self._apply_rules_for_agent(agent_id, new_state, event.event.timestamp)
+            else:
+                logger.debug(f"[{self.service_id}] 📨 CONTEXT UPDATE: No relevant rules for agent '{agent_id}' - skipping rule evaluation")
             
         except Exception as e:
             logger.error(f"[{self.service_id}] Error handling context update: {e}", exc_info=True)
@@ -767,6 +807,12 @@ class ContextRuleManager:
         Returns the new state dictionary if any rule successfully applied a state_update, otherwise None.
         """
         try:
+            # Quick check: if there are no loaded rules relevant to this agent, return early
+            has_relevant_rules = any(agent_id in os.path.basename(rule_file) for rule_file in self.loaded_rule_files)
+            if not has_relevant_rules:
+                logger.debug(f"[{self.service_id}] No relevant rules loaded for agent '{agent_id}' - skipping evaluation")
+                return None
+            
             agent_id_rdf_literal = rdflib.Literal(agent_id)
             agent_specific_rules_query = """
             SELECT DISTINCT ?rule_uri ?action_uri
@@ -981,6 +1027,87 @@ class ContextRuleManager:
             logger.error(f"[{self.service_id}] Error parsing action {action_uri}: {e}", exc_info=True)
             return None
 
+    def _detect_and_apply_modes_from_rules(self, rule_file_paths: List[str]) -> None:
+        """Detect agent modes from rule filenames and send change_mode commands."""
+        import os
+        
+        mode_commands = {}  # agent_id -> mode
+        
+        for rule_file in rule_file_paths:
+            try:
+                # Extract filename without path and extension
+                filename = os.path.basename(rule_file)
+                name_without_ext = os.path.splitext(filename)[0]
+                
+                # Parse filename format: position-mode.ttl (e.g., back-nap.ttl, front-read.ttl)
+                if '-' in name_without_ext:
+                    parts = name_without_ext.split('-')
+                    if len(parts) == 2:
+                        position, mode = parts
+                        
+                        # Map position to agent_id
+                        if position in ['back', 'front', 'all']:
+                            agent_id = position
+                            
+                            # Validate mode for position
+                            valid_modes = {
+                                'back': ['nap', 'read'],
+                                'front': ['nap', 'read'], 
+                                'all': ['normal', 'clean']
+                            }
+                            
+                            if mode in valid_modes.get(position, []):
+                                mode_commands[agent_id] = mode
+                                logger.info(f"[{self.service_id}] Detected mode change needed: {agent_id} → {mode} (from {rule_file})")
+                            else:
+                                logger.warning(f"[{self.service_id}] Invalid mode '{mode}' for position '{position}' in {rule_file}")
+                        else:
+                            logger.debug(f"[{self.service_id}] Unknown position '{position}' in {rule_file}")
+                    else:
+                        logger.debug(f"[{self.service_id}] Rule file doesn't match position-mode format: {rule_file}")
+                else:
+                    logger.debug(f"[{self.service_id}] Rule file doesn't contain position-mode separator: {rule_file}")
+                    
+            except Exception as e:
+                logger.error(f"[{self.service_id}] Error parsing rule filename {rule_file}: {e}")
+        
+        # Send mode change commands
+        for agent_id, mode in mode_commands.items():
+            try:
+                # Check if agent exists (has sent context updates)
+                if agent_id not in self.known_agents:
+                    logger.info(f"[{self.service_id}] Agent '{agent_id}' not yet connected - adding to pending mode detection list (mode: {mode})")
+                    with self.pending_mode_detection_lock:
+                        self.pending_mode_detection.add(agent_id)
+                    continue
+                
+                logger.info(f"[{self.service_id}] 🔄 AUTO MODE CHANGE: Sending change_mode({mode}) to {agent_id}")
+                self._send_action_command(
+                    agent_id=agent_id,
+                    action_name="change_mode",
+                    parameters={"mode": mode},
+                    is_manual=False
+                )
+                logger.info(f"[{self.service_id}] ✅ AUTO MODE CHANGE: Command sent to {agent_id}")
+                
+                # Check if agent is currently powered on - if so, send turn_on to apply new mode settings
+                agent_state = self.get_agent_state(agent_id)
+                if agent_state and agent_state.get("power") == "on":
+                    logger.info(f"[{self.service_id}] 🔧 AUTO MODE APPLY: Agent {agent_id} is powered on - sending turn_on to apply new {mode} mode settings")
+                    # Small delay to ensure mode change is processed first
+                    import time
+                    time.sleep(0.1)
+                    self._send_action_command(
+                        agent_id=agent_id,
+                        action_name="turn_on",
+                        parameters=None,
+                        is_manual=False
+                    )
+                    logger.info(f"[{self.service_id}] ✅ AUTO MODE APPLY: turn_on command sent to {agent_id}")
+                
+            except Exception as e:
+                logger.error(f"[{self.service_id}] Error sending mode change command to {agent_id}: {e}")
+
     def load_rules(self, rdf_file_path: str) -> None:
         """Load rules from an RDF file."""
         try:
@@ -992,6 +1119,9 @@ class ContextRuleManager:
             self.rules_graph.parse(rdf_file_path, format="turtle")
             self.loaded_rule_files.add(rdf_file_path)
             logger.info(f"[{self.service_id}] Successfully loaded rules from {rdf_file_path}")
+            
+            # NEW: Auto mode detection for single file load
+            self._detect_and_apply_modes_from_rules([rdf_file_path])
             
             # Log loaded rule details for verification
             rules_query = """
@@ -1014,13 +1144,27 @@ class ContextRuleManager:
     def load_rules_from_list(self, rule_file_paths: List[str]) -> Dict[str, bool]:
         """Load multiple rule files and return success status for each."""
         results = {}
+        successfully_loaded = []
+        
         for rule_file in rule_file_paths:
             try:
-                self.load_rules(rule_file)
+                # Load rule file (without auto mode detection to avoid duplicates)
+                if rule_file not in self.loaded_rule_files:
+                    self.rules_graph.parse(rule_file, format="turtle")
+                    self.loaded_rule_files.add(rule_file)
+                    successfully_loaded.append(rule_file)
+                    logger.info(f"[{self.service_id}] Successfully loaded rules from {rule_file}")
+                else:
+                    logger.info(f"[{self.service_id}] Rules file {rule_file} already loaded, skipping")
                 results[rule_file] = True
             except Exception as e:
                 logger.error(f"[{self.service_id}] Failed to load rule file {rule_file}: {e}")
                 results[rule_file] = False
+        
+        # NEW: Auto mode detection for all successfully loaded files
+        if successfully_loaded:
+            self._detect_and_apply_modes_from_rules(successfully_loaded)
+        
         return results
 
     def get_loaded_rule_files(self) -> List[str]:
@@ -1069,6 +1213,9 @@ class ContextRuleManager:
                     # NEW: Set 5-second windows for all agents after loading new rules
                     self._set_fast_response_window_for_all_agents("rule load")
                     
+                    # NEW: Auto mode detection for loaded rules
+                    self._detect_and_apply_modes_from_rules(loaded_files)
+                    
                     success = True
                     message = f"Successfully loaded {len(loaded_files)} rule files: {loaded_files}"
                 except Exception as e:
@@ -1089,6 +1236,9 @@ class ContextRuleManager:
                     
                     # NEW: Set 5-second windows for all agents after reloading rules
                     self._set_fast_response_window_for_all_agents("rule reload")
+                    
+                    # NEW: Auto mode detection for reloaded rules
+                    self._detect_and_apply_modes_from_rules(loaded_files)
                     
                     success = True
                     message = f"Successfully reloaded {len(loaded_files)} rule files: {loaded_files}"
@@ -1113,6 +1263,9 @@ class ContextRuleManager:
                     
                     # NEW: Set 5-second windows for all agents after switching rules
                     self._set_fast_response_window_for_all_agents("rule switch")
+                    
+                    # NEW: Auto mode detection for switched rules
+                    self._detect_and_apply_modes_from_rules(loaded_files)
                     
                     success = True
                     message = f"Successfully switched from {old_files} to {loaded_files}"
@@ -1170,6 +1323,9 @@ class ContextRuleManager:
                         
                         # NEW: Set 5-second windows for all agents after switching presets
                         self._set_fast_response_window_for_all_agents("preset switch")
+                        
+                        # NEW: Auto mode detection for preset rules
+                        self._detect_and_apply_modes_from_rules(loaded_files)
                         
                         success = True
                         message = f"Successfully switched to preset '{preset_name}': {loaded_files}"

@@ -1,0 +1,47 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Back Area Nap Mode Rules ---
+# For agent_id "back" - controls both lights and aircon (swapped config)
+# Light config: front group, brightness 100, hue 100, sat 150 (swapped from front)
+# Aircon config: device 322207, turn_on + temp_down (swapped from front)
+
+# Turn ON both lights and aircon when person is near (nap mode)
+lapras:BackNapOnWhenNearRule a lapras:Rule ;
+    lapras:hasAgent "back" ;
+    lapras:hasCondition lapras:BackNapIsNearCondition ;
+    lapras:hasCondition lapras:BackNapIsOffCondition ;
+    lapras:hasAction lapras:SetBackNapPowerOn .
+
+lapras:BackNapIsNearCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:BackNapIsOffCondition
+    lapras:hasSensor "power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "off" .
+
+lapras:SetBackNapPowerOn lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn OFF both lights and aircon when person is far
+lapras:BackNapOffWhenFarRule a lapras:Rule ;
+    lapras:hasAgent "back" ;
+    lapras:hasCondition lapras:BackNapIsOnCondition ;
+    lapras:hasCondition lapras:BackNapIsFarCondition ;
+    lapras:hasAction lapras:SetBackNapPowerOff .
+
+lapras:BackNapIsOnCondition
+    lapras:hasSensor "power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+lapras:BackNapIsFarCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:SetBackNapPowerOff lapras:hasStateUpdate '{"power": "off"}' . 

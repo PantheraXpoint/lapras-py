@@ -1,0 +1,47 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Front Area Reading Mode Rules ---
+# For agent_id "front" - controls both lights and aircon
+# Light config: front group, brightness 250, hue 200, sat 150
+# Aircon config: device 322207, turn_on + temp_up
+
+# Turn ON both lights and aircon when person is near (reading mode)
+lapras:FrontReadOnWhenNearRule a lapras:Rule ;
+    lapras:hasAgent "front" ;
+    lapras:hasCondition lapras:FrontIsNearCondition ;
+    lapras:hasCondition lapras:FrontIsOffCondition ;
+    lapras:hasAction lapras:SetFrontReadPowerOn .
+
+lapras:FrontIsNearCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:FrontIsOffCondition
+    lapras:hasSensor "power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "off" .
+
+lapras:SetFrontReadPowerOn lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn OFF both lights and aircon when person is far
+lapras:FrontReadOffWhenFarRule a lapras:Rule ;
+    lapras:hasAgent "front" ;
+    lapras:hasCondition lapras:FrontIsOnCondition ;
+    lapras:hasCondition lapras:FrontIsFarCondition ;
+    lapras:hasAction lapras:SetFrontReadPowerOff .
+
+lapras:FrontIsOnCondition
+    lapras:hasSensor "power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+lapras:FrontIsFarCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:SetFrontReadPowerOff lapras:hasStateUpdate '{"power": "off"}' . 

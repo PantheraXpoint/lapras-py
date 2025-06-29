@@ -2,9 +2,10 @@ from phue import Bridge
 import argparse
 import json
 import urllib.request
+import time
 
 # bridge IP from OpenWrt
-BRIDGE_IP = '192.168.0.182' 
+BRIDGE_IP = '143.248.55.137:10090' 
 
 USERNAME = "P2laHGvjzthn7Ip5-fAAIbVB9ulu9OlHWk8L7Yex"
 b = Bridge(BRIDGE_IP, USERNAME)
@@ -67,12 +68,54 @@ def set_group_act_with_urllib(group_id, data):
 ###################################################################################
 ###################################################################################
 
-
-
+def test_brightness_and_color():
+    """Test function to demonstrate brightness and color changes"""
+    print("Starting test sequence for brightness and color changes...")
+    
+    # Test with 'all' group - you can change this to 'left' or 'right' if needed
+    group_id = b.get_group_id_by_name('all')
+    
+    # Turn lights on first
+    print("1. Turning lights ON...")
+    b.set_group(group_id, {'on': True})
+    time.sleep(2)
+    
+    # Test brightness levels
+    brightness_levels = [50, 100, 200, 254]  # Low to high brightness
+    for bri in brightness_levels:
+        print(f"2. Setting brightness to {bri}/254...")
+        b.set_group(group_id, {'bri': bri})
+        time.sleep(2)
+    
+    # Test different colors (hue values converted to bridge scale)
+    colors = [
+        (0, "Red"),
+        (60, "Yellow"), 
+        (120, "Green"),
+        (240, "Blue"),
+        (300, "Magenta")
+    ]
+    
+    for hue_deg, color_name in colors:
+        hue_bridge = int(hue_deg / 360 * 65535)  # Convert to bridge scale
+        print(f"3. Setting color to {color_name} (hue: {hue_deg}°)...")
+        b.set_group(group_id, {'hue': hue_bridge, 'sat': 254, 'bri': 200})  # Full saturation, medium brightness
+        time.sleep(3)
+    
+    # Test color loop effect
+    print("4. Testing colorloop effect...")
+    b.set_group(group_id, {'effect': 'colorloop'})
+    time.sleep(10)
+    
+    # Reset to normal
+    print("5. Resetting to normal white light...")
+    b.set_group(group_id, {'effect': 'none', 'sat': 0, 'bri': 200})
+    
+    print("Test sequence completed!")
 
 def main():
     parser = argparse.ArgumentParser(description="Control all Hue lights ON/OFF")
-    parser.add_argument('-g', '--group', choices=['left', 'right', 'all'], required=True,
+    parser.add_argument('-g', '--group', choices=['left', 'right', 'all'], required=False,
                         help='Specify which group to control')
     parser.add_argument('-o', '--on', choices=['on', 'off'],
                         help='Switch lights ON or OFF')
@@ -81,10 +124,20 @@ def main():
     parser.add_argument('-s', '--sat', type=int, help='Saturation(0-254)')
     parser.add_argument('-e', '--effect', choices=['none', 'colorloop'], type=str, help='Effect')
     parser.add_argument('-a', '--alert', choices=['none', 'select', 'lselect'], type=str, help='Alert')
+    parser.add_argument('-t', '--test', action='store_true', help='Run test sequence for brightness and color')
     
     
     # process input values
     args = parser.parse_args()
+    
+    # If test mode is requested, run the test sequence
+    if args.test:
+        test_brightness_and_color()
+        return
+    
+    # Require group argument if not in test mode
+    if not args.group:
+        parser.error("the following arguments are required: -g/--group (unless using --test)")
     
     raw = vars(args)
     data = {}
@@ -93,7 +146,7 @@ def main():
     
     # input data --> dictionary
     for key in raw:
-        if key=='group': continue
+        if key in ['group', 'test']: continue
         if raw[key] is not None:
             data[key] = raw[key]
             if key=='on':

@@ -39,7 +39,9 @@ class RuleAgent:
             "hue_activity_motion", "hue_ir_activity", "hue_all_sensors",
             "aircon_motion_only", "aircon_activity_only", "aircon_ir_only", "aircon_all_sensors",
             "aircon_door_only", "aircon_door_sensors", 
-            "both_devices_motion", "both_devices_all"
+            "both_devices_motion", "both_devices_all",
+            # ClubHouseAgent presets
+            "back_read", "front_read", "back_nap", "front_nap", "all_normal", "all_clean"
         }
         
         # Set up MQTT client

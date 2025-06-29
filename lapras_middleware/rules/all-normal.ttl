@@ -1,0 +1,47 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- All Area Normal Mode Rules ---
+# For agent_id "all" - controls all lights and both aircons
+# Light config: all group, brightness 100, hue 100, sat 150
+# Aircon config: both devices 164793 & 322207, both ON when person near
+
+# Turn ON both lights and aircons when person is near (normal mode)
+lapras:AllNormalOnWhenNearRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:AllNormalIsNearCondition ;
+    lapras:hasCondition lapras:AllNormalIsOffCondition ;
+    lapras:hasAction lapras:SetAllNormalPowerOn .
+
+lapras:AllNormalIsNearCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:AllNormalIsOffCondition
+    lapras:hasSensor "power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "off" .
+
+lapras:SetAllNormalPowerOn lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn OFF both lights and aircons when person is far
+lapras:AllNormalOffWhenFarRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:AllNormalIsOnCondition ;
+    lapras:hasCondition lapras:AllNormalIsFarCondition ;
+    lapras:hasAction lapras:SetAllNormalPowerOff .
+
+lapras:AllNormalIsOnCondition
+    lapras:hasSensor "power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+lapras:AllNormalIsFarCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:SetAllNormalPowerOff lapras:hasStateUpdate '{"power": "off"}' . 

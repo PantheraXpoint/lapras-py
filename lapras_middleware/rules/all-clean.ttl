@@ -1,0 +1,47 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix lapras: <http://lapras.org/rule/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# --- All Area Clean Mode Rules ---
+# For agent_id "all" - controls all lights, aircons stay OFF
+# Light config: all group, brightness 250, hue 200, sat 250
+# Aircon config: both devices 164793 & 322207, both OFF always
+
+# Turn ON lights only when person is near (clean mode - aircons stay OFF)
+lapras:AllCleanOnWhenNearRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:AllCleanIsNearCondition ;
+    lapras:hasCondition lapras:AllCleanIsOffCondition ;
+    lapras:hasAction lapras:SetAllCleanPowerOn .
+
+lapras:AllCleanIsNearCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "near" .
+
+lapras:AllCleanIsOffCondition
+    lapras:hasSensor "power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "off" .
+
+lapras:SetAllCleanPowerOn lapras:hasStateUpdate '{"power": "on"}' .
+
+# Turn OFF lights when person is far
+lapras:AllCleanOffWhenFarRule a lapras:Rule ;
+    lapras:hasAgent "all" ;
+    lapras:hasCondition lapras:AllCleanIsOnCondition ;
+    lapras:hasCondition lapras:AllCleanIsFarCondition ;
+    lapras:hasAction lapras:SetAllCleanPowerOff .
+
+lapras:AllCleanIsOnCondition
+    lapras:hasSensor "power" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "on" .
+
+lapras:AllCleanIsFarCondition
+    lapras:hasSensor "proximity_status" ;
+    lapras:hasOperator lapras:equals ;
+    lapras:hasValue "far" .
+
+lapras:SetAllCleanPowerOff lapras:hasStateUpdate '{"power": "off"}' . 
