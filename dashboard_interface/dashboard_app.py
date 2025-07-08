@@ -152,7 +152,7 @@ def main():
         st.subheader("Sensor Data")
         
         # Define four sensors to monitor
-        monitored_sensors = ['temperature_3', 'light_1', 'tilt_1', 'tilt_2', 'infrared_1', 'distance_1', 'distance_2', 'distance_3', 'distance_4']
+        monitored_sensors = ['temperature_3', 'light_1', 'tilt_1', 'tilt_2', 'infrared_1', 'infrared_2', 'infrared_3', 'infrared_4', 'distance_1', 'distance_2', 'distance_3', 'distance_4', 'motion_01', 'motion_02', 'motion_03', 'motion_04', 'motion_05', 'motion_06', 'motion_07', 'motion_08','motion_MF1', 'motion_MW1', 'activity_s1b', 'activity_s2b', 'activity_s3b', 'activity_s4b', 'activity_s5b', 'activity_s6b', 'activity_s7b', 'activity_s2a', 'activity_s3a', 'activity_s4a', 'activity_s5a', 'activity_s6a', 'door_01']
         
         for sensor_id in monitored_sensors:
             st.write(f"**{sensor_id}**")
